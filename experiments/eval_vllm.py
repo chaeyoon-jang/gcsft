@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=0)
     parser.add_argument("--use_chat_template", action="store_true")
     parser.add_argument("--system_prompt", default=None)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--log_dir", default=None)
     parser.add_argument("--add_conf", action="store_true")
     parser.add_argument("--confidence_prompt_name", default="default")
@@ -119,6 +120,7 @@ def main() -> None:
         top_p=args.top_p,
         max_tokens=args.max_new_tokens,
         stop=[\"</answer>\"],
+        seed=args.seed,
     )
 
     llm = LLM(
@@ -155,6 +157,7 @@ def main() -> None:
             top_p=args.top_p,
             max_tokens=args.max_new_tokens,
             stop=[\"</confidence>\"],
+            seed=args.seed,
         )
         if args.batch_size and args.batch_size > 0:
             conf_outputs = []
