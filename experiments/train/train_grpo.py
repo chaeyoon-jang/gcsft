@@ -17,6 +17,10 @@ from transformers import (
 )
 from trl import GRPOConfig, GRPOTrainer
 
+from dataclasses import fields
+
+from experiments.train.reward_func import rlcr_reward, rewarding_doubt_reward
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="GRPO fine-tuning with TRL")
@@ -48,6 +52,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb_entity", default=None)
     parser.add_argument("--wandb_run_name", default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--reward_mode", choices=["model", "heuristic", "rlcr", "rewarding_doubt"], default="model")
+    parser.add_argument("--rlcr_reward_type", default="accuracy")
+    parser.add_argument("--reward_format_pattern", default="tac")
+    parser.add_argument("--rewarding_doubt_epsilon", type=float, default=1e-4)
+    parser.add_argument("--use_vllm", action="store_true")
+    parser.add_argument("--vllm_device", default="auto")
+    parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=0.9)
+    parser.add_argument("--deepspeed", default=None)
     return parser.parse_args()
 
 
@@ -204,29 +216,63 @@ def main() -> None:
             dir=str(log_dir),
         )
 
-    config = GRPOConfig(
-        output_dir=str(output_dir),
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.num_train_epochs,
-        learning_rate=args.learning_rate,
-        max_prompt_length=args.max_prompt_length,
-        max_completion_length=args.max_completion_length,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        bf16=args.bf16,
-        gradient_checkpointing=args.gradient_checkpointing,
-        optim="adamw_torch_fused",
-        lr_scheduler_type="cosine",
-        seed=args.seed,
-        report_to=report_to,
-    )
+    config_kwargs = {
+        "output_dir": str(output_dir),
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "num_train_epochs": args.num_train_epochs,
+        "learning_rate": args.learning_rate,
+        "max_prompt_length": args.max_prompt_length,
+        "max_completion_length": args.max_completion_length,
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+        "bf16": args.bf16,
+        "gradient_checkpointing": args.gradient_checkpointing,
+        "optim": "adamw_torch_fused",
+        "lr_scheduler_type": "cosine",
+        "seed": args.seed,
+        "report_to": report_to,
+        "use_vllm": args.use_vllm,
+        "vllm_device": args.vllm_device,
+        "vllm_gpu_memory_utilization": args.vllm_gpu_memory_utilization,
+        "deepspeed": args.deepspeed,
+    }
+    allowed_keys = {field.name for field in fields(GRPOConfig)}
+    config = GRPOConfig(**{key: value for key, value in config_kwargs.items() if key in allowed_keys})
+
+    def rlcr_reward_fn(prompts: List[str], completions: List[str], **kwargs: Any) -> List[float]:
+        return rlcr_reward(
+            args.rlcr_reward_type,
+            args.reward_format_pattern,
+            completions,
+            kwargs.get("reference") or [],
+            kwargs.get("source"),
+        )
+
+    def rewarding_doubt_reward_fn(
+        prompts: List[str], completions: List[str], **kwargs: Any
+    ) -> List[float]:
+        return rewarding_doubt_reward(
+            args.reward_format_pattern,
+            completions,
+            kwargs.get("reference") or [],
+            kwargs.get("source"),
+            epsilon=args.rewarding_doubt_epsilon,
+        )
+
+    reward_funcs = [reward_model_fn]
+    if args.reward_mode == "heuristic":
+        reward_funcs = [heuristic_reward]
+    elif args.reward_mode == "rlcr":
+        reward_funcs = [rlcr_reward_fn]
+    elif args.reward_mode == "rewarding_doubt":
+        reward_funcs = [rewarding_doubt_reward_fn]
 
     trainer = GRPOTrainer(
         model=model,
         args=config,
         train_dataset=train_dataset,
-        reward_funcs=[reward_model_fn],
+        reward_funcs=reward_funcs,
         processing_class=tokenizer,
     )
 
