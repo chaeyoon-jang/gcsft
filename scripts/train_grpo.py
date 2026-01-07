@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 import argparse
 import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
+import wandb
 from datasets import Dataset, load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -40,6 +43,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora_target_modules", nargs="*", default=None)
     parser.add_argument("--use_4bit", action="store_true")
     parser.add_argument("--use_8bit", action="store_true")
+    parser.add_argument("--log_dir", default=None)
+    parser.add_argument("--wandb_project", default=None)
+    parser.add_argument("--wandb_entity", default=None)
+    parser.add_argument("--wandb_run_name", default=None)
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -56,6 +63,17 @@ def load_any_dataset(path: str) -> Dataset:
     if path.endswith(".json"):
         return load_dataset("json", data_files=path, split="train")
     return load_dataset(path, split="train")
+
+
+def resolve_log_dir(log_dir: Optional[str]) -> Path:
+    base_dir = Path("logs")
+    base_dir.mkdir(parents=True, exist_ok=True)
+    if log_dir:
+        run_dir = base_dir / log_dir
+    else:
+        run_dir = base_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def build_prompt(example: Dict[str, Any], tokenizer: AutoTokenizer) -> str:
@@ -103,6 +121,7 @@ def build_reward_model(reward_model_name: str, bf16: bool):
 def main() -> None:
     args = parse_args()
     torch.backends.cuda.matmul.allow_tf32 = args.tf32
+    log_dir = resolve_log_dir(args.log_dir)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True)
     if tokenizer.pad_token is None:
@@ -173,8 +192,20 @@ def main() -> None:
             scores = reward_model(**inputs).logits.squeeze(-1)
         return scores.detach().float().tolist()
 
+    output_dir = log_dir / args.output_dir
+
+    report_to = []
+    if args.wandb_project:
+        report_to = ["wandb"]
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=args.wandb_run_name,
+            dir=str(log_dir),
+        )
+
     config = GRPOConfig(
-        output_dir=args.output_dir,
+        output_dir=str(output_dir),
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.num_train_epochs,
@@ -188,7 +219,7 @@ def main() -> None:
         optim="adamw_torch_fused",
         lr_scheduler_type="cosine",
         seed=args.seed,
-        report_to=[],
+        report_to=report_to,
     )
 
     trainer = GRPOTrainer(
@@ -200,7 +231,9 @@ def main() -> None:
     )
 
     trainer.train()
-    trainer.save_model(args.output_dir)
+    trainer.save_model(str(output_dir))
+    if args.wandb_project:
+        wandb.finish()
 
 
 if __name__ == "__main__":

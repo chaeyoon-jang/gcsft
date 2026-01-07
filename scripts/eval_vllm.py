@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import argparse
 import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from datasets import Dataset, load_dataset
@@ -23,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=0)
     parser.add_argument("--use_chat_template", action="store_true")
     parser.add_argument("--system_prompt", default=None)
+    parser.add_argument("--log_dir", default=None)
     return parser.parse_args()
 
 
@@ -38,6 +41,17 @@ def load_any_dataset(path: str) -> Dataset:
     if path.endswith(".json"):
         return load_dataset("json", data_files=path, split="train")
     return load_dataset(path, split="train")
+
+
+def resolve_log_dir(log_dir: Optional[str]) -> Path:
+    base_dir = Path("logs")
+    base_dir.mkdir(parents=True, exist_ok=True)
+    if log_dir:
+        run_dir = base_dir / log_dir
+    else:
+        run_dir = base_dir / datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def build_prompt(
@@ -74,6 +88,7 @@ def extract_reference(example: Dict[str, Any]) -> Optional[str]:
 
 def main() -> None:
     args = parse_args()
+    log_dir = resolve_log_dir(args.log_dir)
 
     dataset = load_any_dataset(args.eval_file)
     needs_chat = args.use_chat_template or any("messages" in row for row in dataset)
@@ -136,14 +151,19 @@ def main() -> None:
         else 0.0,
     }
 
+    output_path = None
     if args.output_file:
-        with open(args.output_file, "w", encoding="utf-8") as f:
-            for record in records:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        with open(args.output_file + ".metrics.json", "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+        output_path = Path(args.output_file)
+        if not output_path.is_absolute():
+            output_path = log_dir / output_path
     else:
-        print(json.dumps(results, ensure_ascii=False, indent=2))
+        output_path = log_dir / "eval_outputs.jsonl"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    with open(str(output_path) + ".metrics.json", "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
