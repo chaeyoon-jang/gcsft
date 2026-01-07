@@ -7,3 +7,5 @@ bitsandbytes>=0.43.0
 vllm>=0.5.0
 torch>=2.2.0
 wandb>=0.17.0
+requests>=2.31.0
+sglang>=0.2.0
