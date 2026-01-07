@@ -3,13 +3,14 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from datasets import Dataset, load_dataset
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 from vllm.lora.request import LoRARequest
 
+from prompt_hub import get_confidence_prompt
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate models with vLLM")
@@ -26,6 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use_chat_template", action="store_true")
     parser.add_argument("--system_prompt", default=None)
     parser.add_argument("--log_dir", default=None)
+    parser.add_argument("--add_conf", action="store_true")
+    parser.add_argument("--confidence_prompt_name", default="default")
     return parser.parse_args()
 
 
@@ -59,21 +62,29 @@ def build_prompt(
     tokenizer: Optional[AutoTokenizer],
     use_chat_template: bool,
     system_prompt: Optional[str],
-) -> str:
+) -> Tuple[str, Optional[List[Dict[str, str]]]]:
     if "prompt" in example:
-        return example["prompt"]
+        return example["prompt"], None
     if "text" in example:
-        return example["text"]
+        return example["text"], None
     if "messages" in example:
         messages = list(example["messages"])
         if system_prompt and not any(m.get("role") == "system" for m in messages):
             messages = [{"role": "system", "content": system_prompt}] + messages
         if tokenizer and use_chat_template:
-            return tokenizer.apply_chat_template(
+            return (
+                tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
+                ),
+                messages,
             )
-        return "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+        return "\n".join([f"{m['role']}: {m['content']}" for m in messages]), messages
     raise ValueError("Example must contain 'prompt', 'text', or 'messages'.")
+
+
+def build_confidence_input(prompt: str, answer: str, prompt_name: str) -> str:
+    conf_prompt = get_confidence_prompt(prompt_name)
+    return f\"{conf_prompt}\\nQuestion:\\n{prompt}\\nAnswer:\\n{answer}\"
 
 
 def extract_reference(example: Dict[str, Any]) -> Optional[str]:
@@ -96,16 +107,18 @@ def main() -> None:
     if needs_chat:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True)
 
-    prompts = [
+    prompt_entries = [
         build_prompt(row, tokenizer, args.use_chat_template, args.system_prompt)
         for row in dataset
     ]
+    prompts = [entry[0] for entry in prompt_entries]
     references = [extract_reference(row) for row in dataset]
 
-    sampling_params = SamplingParams(
+    answer_params = SamplingParams(
         temperature=args.temperature,
         top_p=args.top_p,
         max_tokens=args.max_new_tokens,
+        stop=[\"</answer>\"],
     )
 
     llm = LLM(
@@ -124,20 +137,46 @@ def main() -> None:
         for idx in range(0, len(prompts), args.batch_size):
             batch_prompts = prompts[idx : idx + args.batch_size]
             outputs.extend(
-                llm.generate(batch_prompts, sampling_params, lora_request=lora_request)
+                llm.generate(batch_prompts, answer_params, lora_request=lora_request)
             )
     else:
-        outputs = llm.generate(prompts, sampling_params, lora_request=lora_request)
+        outputs = llm.generate(prompts, answer_params, lora_request=lora_request)
 
     records: List[Dict[str, Any]] = []
     exact_matches = 0
-    for prompt, output, reference in zip(prompts, outputs, references):
+    confidence_outputs: List[Optional[str]] = [None] * len(prompts)
+    if args.add_conf:
+        confidence_prompts = [
+            build_confidence_input(prompt, output.outputs[0].text, args.confidence_prompt_name)
+            for prompt, output in zip(prompts, outputs)
+        ]
+        confidence_params = SamplingParams(
+            temperature=args.temperature,
+            top_p=args.top_p,
+            max_tokens=args.max_new_tokens,
+            stop=[\"</confidence>\"],
+        )
+        if args.batch_size and args.batch_size > 0:
+            conf_outputs = []
+            for idx in range(0, len(confidence_prompts), args.batch_size):
+                conf_batch = confidence_prompts[idx : idx + args.batch_size]
+                conf_outputs.extend(
+                    llm.generate(conf_batch, confidence_params, lora_request=lora_request)
+                )
+        else:
+            conf_outputs = llm.generate(
+                confidence_prompts, confidence_params, lora_request=lora_request
+            )
+        confidence_outputs = [out.outputs[0].text for out in conf_outputs]
+
+    for idx, (prompt, output, reference) in enumerate(zip(prompts, outputs, references)):
         completion = output.outputs[0].text
         records.append(
             {
                 "prompt": prompt,
                 "completion": completion,
                 "reference": reference,
+                "confidence": confidence_outputs[idx],
             }
         )
         if reference:
