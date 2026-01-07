@@ -19,7 +19,7 @@ from trl import GRPOConfig, GRPOTrainer
 
 from dataclasses import fields
 
-from experiments.train.reward_func import rlcr_reward, rewarding_doubt_reward
+from utils.reward_func import rlcr_reward, rewarding_doubt_reward
 
 
 def parse_args() -> argparse.Namespace:

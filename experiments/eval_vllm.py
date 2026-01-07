@@ -85,7 +85,7 @@ def build_prompt(
 
 def build_confidence_input(prompt: str, answer: str, prompt_name: str) -> str:
     conf_prompt = get_confidence_prompt(prompt_name)
-    return f\"{conf_prompt}\\nQuestion:\\n{prompt}\\nAnswer:\\n{answer}\"
+    return f"{conf_prompt}\nQuestion:\n{prompt}\nAnswer:\n{answer}"
 
 
 def extract_reference(example: Dict[str, Any]) -> Optional[str]:
@@ -119,7 +119,7 @@ def main() -> None:
         temperature=args.temperature,
         top_p=args.top_p,
         max_tokens=args.max_new_tokens,
-        stop=[\"</answer>\"],
+        stop=["</answer>"],
         seed=args.seed,
     )
 
@@ -132,7 +132,7 @@ def main() -> None:
 
     lora_request = None
     if args.lora_path:
-        lora_request = LoRARequest(\"eval_adapter\", 1, args.lora_path)
+        lora_request = LoRARequest("eval_adapter", 1, args.lora_path)
 
     outputs = []
     if args.batch_size and args.batch_size > 0:
@@ -156,7 +156,7 @@ def main() -> None:
             temperature=args.temperature,
             top_p=args.top_p,
             max_tokens=args.max_new_tokens,
-            stop=[\"</confidence>\"],
+            stop=["</confidence>"],
             seed=args.seed,
         )
         if args.batch_size and args.batch_size > 0:
