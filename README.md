@@ -44,7 +44,7 @@ pip install -r requirements.txt
 - **Evaluation**: TBD
 
 ### Cluster 2: External Evidence based Problem 
-- **Training**: NIAH
+- **Training**: ruler benchmark
 - **Evaluation**: TBD
 
 ### Cluster 3: Mixed Problem
