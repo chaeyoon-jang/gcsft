@@ -1,21 +1,28 @@
 #!/usr/bin/env python
 import argparse
 import json
+import time
+import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from tqdm.auto import tqdm
 
 from datasets import Dataset, load_dataset
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 from vllm.lora.request import LoRARequest
 
-from prompt_hub import get_confidence_prompt
+from utils.prompt_hub import (get_answer_only_prompt, 
+                        get_reasoning_prompt, 
+                        get_confidence_prompt)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate models with vLLM")
     parser.add_argument("--model_name_or_path", required=True)
     parser.add_argument("--eval_file", required=True)
+    parser.add_argument("--instruction_type", default="reasoning")
     parser.add_argument("--output_file")
     parser.add_argument("--max_new_tokens", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -30,6 +37,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log_dir", default=None)
     parser.add_argument("--add_conf", action="store_true")
     parser.add_argument("--confidence_prompt_name", default="default")
+    parser.add_argument("--include_prompt", action="store_true",
+                        help="Include original/processed prompt in output records")
+    parser.add_argument("--dry_run", action="store_true",
+                        help="Skip model inference and produce dummy outputs for validation")
     return parser.parse_args()
 
 
@@ -44,6 +55,8 @@ def load_any_dataset(path: str) -> Dataset:
         return load_jsonl(path)
     if path.endswith(".json"):
         return load_dataset("json", data_files=path, split="train")
+    if path.endswith(".csv") or path.endswith(".tsv"):
+        return Dataset.from_pandas(pd.read_csv(path))
     return load_dataset(path, split="train")
 
 
@@ -62,16 +75,18 @@ def build_prompt(
     example: Dict[str, Any],
     tokenizer: Optional[AutoTokenizer],
     use_chat_template: bool,
+    instruction_prompt: Optional[str],
     system_prompt: Optional[str],
 ) -> Tuple[str, Optional[List[Dict[str, str]]]]:
     if "prompt" in example:
         return example["prompt"], None
-    if "text" in example:
-        return example["text"], None
-    if "messages" in example:
-        messages = list(example["messages"])
-        if system_prompt and not any(m.get("role") == "system" for m in messages):
-            messages = [{"role": "system", "content": system_prompt}] + messages
+    if "question" in example:
+        messages = list(example["question"])
+        if system_prompt: #and not any(m.get("role") == "system" for m in messages):
+            messages = [{"role": "system", "content": system_prompt}, 
+                        {"role": "user", "content": instruction_prompt\
+                            + example["question"] if instruction_prompt 
+                            else example["question"]}]
         if tokenizer and use_chat_template:
             return (
                 tokenizer.apply_chat_template(
@@ -80,7 +95,7 @@ def build_prompt(
                 messages,
             )
         return "\n".join([f"{m['role']}: {m['content']}" for m in messages]), messages
-    raise ValueError("Example must contain 'prompt', 'text', or 'messages'.")
+    raise ValueError("Example must contain 'prompt' or 'question'.")
 
 
 def build_confidence_input(prompt: str, answer: str, prompt_name: str) -> str:
@@ -95,24 +110,33 @@ def extract_reference(example: Dict[str, Any]) -> Optional[str]:
         return example["response"]
     if "answer" in example:
         return example["answer"]
+    if "outputs" in example:
+        return example["outputs"]
     return None
 
 
 def main() -> None:
     args = parse_args()
-    log_dir = resolve_log_dir(args.log_dir)
+    # Only resolve a log directory when no explicit output path is provided
+    log_dir: Optional[Path] = None
+    if not args.output_file:
+        log_dir = resolve_log_dir(args.log_dir)
 
-    dataset = load_any_dataset(args.eval_file)
+    overall_start = time.time()
+    dataset = load_any_dataset(args.eval_file) # dataset file must include 'question' field
     needs_chat = args.use_chat_template or any("messages" in row for row in dataset)
     tokenizer = None
     if needs_chat:
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True)
-
+        
+    instruction_prompt = get_reasoning_prompt("default") if args.instruction_type == "reasoning" else \
+                         get_answer_only_prompt("default")
     prompt_entries = [
-        build_prompt(row, tokenizer, args.use_chat_template, args.system_prompt)
+        build_prompt(row, tokenizer, args.use_chat_template, instruction_prompt, args.system_prompt)
         for row in dataset
     ]
-    prompts = [entry[0] for entry in prompt_entries]
+    prompts = [entry[0] + "<think>" if args.instruction_type == "reasoning" else entry[0]\
+        + "<answer>" for entry in prompt_entries]
     references = [extract_reference(row) for row in dataset]
 
     answer_params = SamplingParams(
@@ -123,26 +147,50 @@ def main() -> None:
         seed=args.seed,
     )
 
-    llm = LLM(
-        model=args.model_name_or_path,
-        tensor_parallel_size=args.tensor_parallel_size,
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        enable_lora=bool(args.lora_path),
-    )
+    llm = None
+    if not args.dry_run:
+        llm = LLM(
+            model=args.model_name_or_path,
+            tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            enable_lora=bool(args.lora_path),
+        )
 
     lora_request = None
     if args.lora_path:
         lora_request = LoRARequest("eval_adapter", 1, args.lora_path)
 
     outputs = []
-    if args.batch_size and args.batch_size > 0:
-        for idx in range(0, len(prompts), args.batch_size):
-            batch_prompts = prompts[idx : idx + args.batch_size]
-            outputs.extend(
-                llm.generate(batch_prompts, answer_params, lora_request=lora_request)
-            )
+    if args.dry_run:
+        # Simulate progress without inference
+        pbar = tqdm(total=len(prompts), desc="vLLM generation (dry-run)", unit="ex")
+        if args.batch_size and args.batch_size > 0:
+            for idx in range(0, len(prompts), args.batch_size):
+                batch_prompts = prompts[idx : idx + args.batch_size]
+                # Simulate latency
+                time.sleep(0.01)
+                outputs.extend([{"outputs": [{"text": ""}]} for _ in batch_prompts])
+                pbar.update(len(batch_prompts))
+        else:
+            time.sleep(0.01)
+            outputs = [{"outputs": [{"text": ""}]} for _ in prompts]
+            pbar.update(len(prompts))
+        pbar.close()
     else:
-        outputs = llm.generate(prompts, answer_params, lora_request=lora_request)
+        if args.batch_size and args.batch_size > 0:
+            pbar = tqdm(total=len(prompts), desc="vLLM generation", unit="ex")
+            for idx in range(0, len(prompts), args.batch_size):
+                batch_prompts = prompts[idx : idx + args.batch_size]
+                outputs.extend(
+                    llm.generate(batch_prompts, answer_params, lora_request=lora_request, use_tqdm=False)
+                )
+                pbar.update(len(batch_prompts))
+            pbar.close()
+        else:
+            pbar = tqdm(total=len(prompts), desc="vLLM generation", unit="ex")
+            outputs = llm.generate(prompts, answer_params, lora_request=lora_request, use_tqdm=False)
+            pbar.update(len(prompts))
+            pbar.close()
 
     records: List[Dict[str, Any]] = []
     exact_matches = 0
@@ -159,53 +207,93 @@ def main() -> None:
             stop=["</confidence>"],
             seed=args.seed,
         )
-        if args.batch_size and args.batch_size > 0:
-            conf_outputs = []
-            for idx in range(0, len(confidence_prompts), args.batch_size):
-                conf_batch = confidence_prompts[idx : idx + args.batch_size]
-                conf_outputs.extend(
-                    llm.generate(conf_batch, confidence_params, lora_request=lora_request)
-                )
+        if args.dry_run:
+            # Simulate confidence generation
+            pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence gen (dry-run)", unit="ex")
+            if args.batch_size and args.batch_size > 0:
+                conf_outputs = []
+                for idx in range(0, len(confidence_prompts), args.batch_size):
+                    conf_batch = confidence_prompts[idx : idx + args.batch_size]
+                    time.sleep(0.01)
+                    conf_outputs.extend([{"outputs": [{"text": ""}]} for _ in conf_batch])
+                    pbar_conf.update(len(conf_batch))
+            else:
+                time.sleep(0.01)
+                conf_outputs = [{"outputs": [{"text": ""}]} for _ in confidence_prompts]
+                pbar_conf.update(len(confidence_prompts))
+            pbar_conf.close()
+            confidence_outputs = [out["outputs"][0]["text"] for out in conf_outputs]
         else:
-            conf_outputs = llm.generate(
-                confidence_prompts, confidence_params, lora_request=lora_request
-            )
-        confidence_outputs = [out.outputs[0].text for out in conf_outputs]
+            if args.batch_size and args.batch_size > 0:
+                pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence generation", unit="ex")
+                conf_outputs = []
+                for idx in range(0, len(confidence_prompts), args.batch_size):
+                    conf_batch = confidence_prompts[idx : idx + args.batch_size]
+                    conf_outputs.extend(
+                        llm.generate(conf_batch, confidence_params, lora_request=lora_request, use_tqdm=False)
+                    )
+                    pbar_conf.update(len(conf_batch))
+                pbar_conf.close()
+            else:
+                pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence generation", unit="ex")
+                conf_outputs = llm.generate(
+                    confidence_prompts, confidence_params, lora_request=lora_request, use_tqdm=False
+                )
+                pbar_conf.update(len(confidence_prompts))
+                pbar_conf.close()
+            confidence_outputs = [out.outputs[0].text for out in conf_outputs]
 
-    for idx, (prompt, output, reference) in enumerate(zip(prompts, outputs, references)):
-        completion = output.outputs[0].text
-        records.append(
-            {
-                "prompt": prompt,
-                "completion": completion,
-                "reference": reference,
-                "confidence": confidence_outputs[idx],
-            }
-        )
-        if reference:
-            exact_matches += int(reference.strip() == completion.strip())
+    generated_texts: List[str]
+    # Normalize outputs for dry-run vs real outputs
+    if args.dry_run:
+        generated_texts = [out["outputs"][0]["text"] for out in outputs]
+    else:
+        generated_texts = [out.outputs[0].text for out in outputs]
+
+    for idx, (prompt, completion, reference) in enumerate(zip(prompts, generated_texts, references)):
+        rec: Dict[str, Any] = {
+            "completion": completion,
+            "reference": reference,
+            "confidence": confidence_outputs[idx],
+        }
+        if args.include_prompt:
+            rec["prompt"] = prompt
+        records.append(rec)
+        #if reference:
+        #    exact_matches += int(reference.strip() == completion.strip())
+
+    overall_end = time.time()
+    elapsed_seconds = overall_end - overall_start
 
     results = {
         "count": len(records),
-        "exact_match": exact_matches / len(records) if records else 0.0,
+        #"exact_match": exact_matches / len(records) if records else 0.0,
         "average_completion_length": sum(len(r["completion"]) for r in records) / len(records)
         if records
         else 0.0,
+        "elapsed_seconds": elapsed_seconds,
     }
 
-    output_path = None
+    output_path: Path
     if args.output_file:
+        # Honor provided output path as-is; create parent directories as needed
         output_path = Path(args.output_file)
-        if not output_path.is_absolute():
-            output_path = log_dir / output_path
     else:
+        # Fall back to a timestamped logs directory
+        assert log_dir is not None
         output_path = log_dir / "eval_outputs.jsonl"
+
+    # Ensure the output directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output_path, "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     with open(str(output_path) + ".metrics.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
+
+    # Print concise timing summary for terminal visibility
+    print(f"Processed {len(records)} examples in {elapsed_seconds:.2f}s. Outputs: {output_path}")
 
 
 if __name__ == "__main__":
