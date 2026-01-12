@@ -32,7 +32,7 @@ pip install -r requirements.txt
 | Model | Size |
 |-------|------|
 | LLaMA-3.2-3B-Instruct | Small size |
-| Qwen-3-8B | Medicum size | 
+| Qwen-3-8B | Medium size | 
 | GPT-oss-20B | Large size | 
 
 ---
@@ -44,7 +44,7 @@ pip install -r requirements.txt
 - **Evaluation**: TBD
 
 ### Cluster 2: External Evidence based Problem 
-- **Training**: ruler benchmark
+- **Training**: Ruler benchmark
 - **Evaluation**: TBD
 
 ### Cluster 3: Mixed Problem
