@@ -6,7 +6,7 @@ REASONING_PROMPTS: Dict[str, str] = {
         "Given a question, think step by step to arrive at the correct answer.\n"
         "First, provide your reasoning enclosed in <think> and </think> tags.\n"
         "Then, provide the final answer enclosed in <answer> and </answer> tags.\n"
-        "The <answer> tag must contain only the final answer, with no additional explanation."
+        "The <answer> tag must contain only the final answer, with no additional explanation.\n"
     ),
 }
 
@@ -15,7 +15,7 @@ ANSWER_ONLY_PROMPTS: Dict[str, str] = {
         "You are an answering assistant.\n"
         "Given a question, provide the final answer.\n"
         "Respond with the answer enclosed in <answer> and </answer> tags.\n"
-        "The <answer> tag must contain only the final answer, with no additional explanation."
+        "The <answer> tag must contain only the final answer, with no additional explanation.\n"
     ),
 }
 

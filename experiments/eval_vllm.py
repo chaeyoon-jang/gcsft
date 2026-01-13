@@ -21,16 +21,18 @@ from utils.prompt_hub import (get_answer_only_prompt,
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate models with vLLM")
     parser.add_argument("--model_name_or_path", required=True)
-    parser.add_argument("--eval_file", required=True)
+    parser.add_argument("--eval_file", default="openai/gsm8k")
+    parser.add_argument("--split", default="main")
+    parser.add_argument("--data_type", default="train")
     parser.add_argument("--instruction_type", default="reasoning")
     parser.add_argument("--output_file")
     parser.add_argument("--max_new_tokens", type=int, default=256)
-    parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--top_p", type=float, default=0.9)
+    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--lora_path")
-    parser.add_argument("--batch_size", type=int, default=0)
+    parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--use_chat_template", action="store_true")
     parser.add_argument("--system_prompt", default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -50,14 +52,18 @@ def load_jsonl(path: str) -> Dataset:
     return Dataset.from_list(records)
 
 
-def load_any_dataset(path: str) -> Dataset:
+def load_any_dataset(path: str, split: str, data_type: str) -> Dataset:
     if path.endswith(".jsonl"):
         return load_jsonl(path)
     if path.endswith(".json"):
         return load_dataset("json", data_files=path, split="train")
     if path.endswith(".csv") or path.endswith(".tsv"):
         return Dataset.from_pandas(pd.read_csv(path))
-    return load_dataset(path, split="train")
+    return load_dataset(path, split)[data_type]
+'''
+    if data_name == "gsm":
+        data = datasets.load_dataset('openai/gsm8k', 'main')[data_type]
+'''
 
 
 def resolve_log_dir(log_dir: Optional[str]) -> Path:
@@ -81,16 +87,18 @@ def build_prompt(
     if "prompt" in example:
         return example["prompt"], None
     if "question" in example:
-        messages = list(example["question"])
-        if system_prompt: #and not any(m.get("role") == "system" for m in messages):
-            messages = [{"role": "system", "content": system_prompt}, 
-                        {"role": "user", "content": instruction_prompt\
-                            + example["question"] if instruction_prompt 
-                            else example["question"]}]
+        messages = [{"role": "user", "content": instruction_prompt\
+                        + example["question"] if instruction_prompt 
+                        else example["question"]}] 
+        if system_prompt: 
+            messages = [{"role": "system", "content": system_prompt}] + messages
         if tokenizer and use_chat_template:
             return (
                 tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True,
+                eable_thinking=True if "reasoning" in instruction_prompt else False
                 ),
                 messages,
             )
@@ -112,6 +120,8 @@ def extract_reference(example: Dict[str, Any]) -> Optional[str]:
         return example["answer"]
     if "outputs" in example:
         return example["outputs"]
+    if "true_answer" in example:
+        return example["true_answer"]
     return None
 
 
@@ -123,7 +133,7 @@ def main() -> None:
         log_dir = resolve_log_dir(args.log_dir)
 
     overall_start = time.time()
-    dataset = load_any_dataset(args.eval_file) # dataset file must include 'question' field
+    dataset = load_any_dataset(args.eval_file, split=args.split, data_type=args.data_type) # dataset file must include 'question' field
     needs_chat = args.use_chat_template or any("messages" in row for row in dataset)
     tokenizer = None
     if needs_chat:
@@ -252,6 +262,7 @@ def main() -> None:
 
     for idx, (prompt, completion, reference) in enumerate(zip(prompts, generated_texts, references)):
         rec: Dict[str, Any] = {
+            "input": prompt,  
             "completion": completion,
             "reference": reference,
             "confidence": confidence_outputs[idx],
