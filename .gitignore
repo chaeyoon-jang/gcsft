@@ -47,4 +47,5 @@ logs/
 checkpoints/
 *.ckpt
 *.pth
-*.bin
+*.bindata.tar.gz
+*.tar.gz
