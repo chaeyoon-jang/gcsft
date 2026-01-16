@@ -108,7 +108,7 @@ def build_prompt(
 
 def build_confidence_input(prompt: str, answer: str, prompt_name: str) -> str:
     conf_prompt = get_confidence_prompt(prompt_name)
-    return f"{conf_prompt}\nQuestion:\n{prompt}\nAnswer:\n{answer}"
+    return prompt + answer + "</answer>" + conf_prompt #f"{conf_prompt}\nQuestion:\n{prompt}\nAnswer:\n{answer}"
 
 
 def extract_reference(example: Dict[str, Any]) -> Optional[str]:

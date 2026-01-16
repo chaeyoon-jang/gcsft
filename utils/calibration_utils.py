@@ -25,7 +25,10 @@ def ece(y_true: np.ndarray, y_proba: np.ndarray, n_bins: int = 10) -> float:
     
     ece_value = 0.0
     for i in range(n_bins):
-        mask = (y_proba >= bin_edges[i]) & (y_proba < bin_edges[i + 1])
+        if i < n_bins - 1:
+            mask = (y_proba >= bin_edges[i]) & (y_proba < bin_edges[i + 1])
+        else:  
+            mask = (y_proba >= bin_edges[i]) & (y_proba <= bin_edges[i + 1])
         if mask.sum() > 0:
             accuracy = y_true[mask].mean()
             confidence = y_proba[mask].mean()
