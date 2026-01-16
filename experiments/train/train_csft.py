@@ -271,7 +271,7 @@ class CalibrationTuner(Trainer):
                        "kl_loss": []}
 
         for inputs in tqdm(eval_dataloader, leave=False):
-            B = len(inputs.get("conf_input"))
+            B = len(inputs.get(self.prompt_key))
 
             with torch.inference_mode():
                 loss_metrics = self.compute_loss(
