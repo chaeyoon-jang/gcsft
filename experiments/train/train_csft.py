@@ -165,6 +165,7 @@ class CalibrationTuner(Trainer):
             args=args,
             processing_class=tokenizer,
             train_dataset=train_dataset,
+            #data_collator=self._collate_fn,
             data_collator=default_collate,
         )
 
@@ -375,7 +376,7 @@ def load_model_and_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name,
         padding_side="left",
-        model_max_length=args.max_token_length,
+        model_max_length=args.max_seq_length,
     )
     
     torch_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
@@ -427,8 +428,18 @@ def main(args):
     output_dir.mkdir(parents=True, exist_ok=True)
     
     train_ds, eval_ds = load_datasets(args)
-    train_ds = train_ds.remove_columns(["target_answer"])
-    eval_ds = eval_ds.remove_columns(["target_answer"])
+    cols_to_keep = [
+        args.prompt_key,                # "input_prompt"
+        args.response_key,              # "predicted_answer"
+        args.confidence_input_key,      # "conf_input_single"
+        args.confidence_key,            # "conf_label_single"
+        "task_type"
+    ]
+    cols_to_remove = [col for col in train_ds.column_names if col not in cols_to_keep]
+    
+    if cols_to_remove:
+        train_ds = train_ds.remove_columns(cols_to_remove)
+        eval_ds = eval_ds.remove_columns(cols_to_remove)
     
     model, tokenizer = load_model_and_tokenizer(args)
     
