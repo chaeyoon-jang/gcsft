@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os 
 import argparse
 import json
 import time
@@ -31,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
-    parser.add_argument("--lora_path")
+    parser.add_argument("--query_peft_dir", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--use_chat_template", action="store_true")
     parser.add_argument("--system_prompt", default=None)
@@ -41,8 +42,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--confidence_prompt_name", default="default")
     parser.add_argument("--include_prompt", action="store_true",
                         help="Include original/processed prompt in output records")
-    parser.add_argument("--dry_run", action="store_true",
-                        help="Skip model inference and produce dummy outputs for validation")
     return parser.parse_args()
 
 
@@ -60,10 +59,6 @@ def load_any_dataset(path: str, split: str, data_type: str) -> Dataset:
     if path.endswith(".csv") or path.endswith(".tsv"):
         return Dataset.from_pandas(pd.read_csv(path))
     return load_dataset(path, split)[data_type]
-'''
-    if data_name == "gsm":
-        data = datasets.load_dataset('openai/gsm8k', 'main')[data_type]
-'''
 
 
 def resolve_log_dir(log_dir: Optional[str]) -> Path:
@@ -133,11 +128,48 @@ def main() -> None:
         log_dir = resolve_log_dir(args.log_dir)
 
     overall_start = time.time()
+
+    answer_params = SamplingParams(
+        temperature=args.temperature,
+        top_p=args.top_p,
+        max_tokens=args.max_new_tokens,
+        stop=["</answer>"],
+        seed=args.seed,
+    )
+
+    if args.query_peft_dir:
+        
+        exact_dir = args.query_peft_dir.rsplit("/", 1)[0] + "/merged_model"
+        
+        if not os.path.isdir(exact_dir):
+            from transformers import AutoModelForCausalLM
+            from peft import PeftModel
+            model = AutoModelForCausalLM.from_pretraineda(args.model_name_or_path, 
+                                                         device_map="auto", 
+                                                         torch_dtype="auto")
+            model = PeftModel.from_pretrained(model, args.query_peft_dir)
+            tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+            model = model.merge_and_unload()
+            
+            print("LoRA weights merged successfully.")
+            model.save_pretrained(exact_dir)
+            tokenizer.save_pretrained(exact_dir)
+            
+            del model, tokenizer
+            import gc 
+            gc.collect()
+            
+    llm = LLM(
+        model=args.model_name_or_path if not args.query_peft_dir else exact_dir,
+        tensor_parallel_size=args.tensor_parallel_size,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+    )
+    
     dataset = load_any_dataset(args.eval_file, split=args.split, data_type=args.data_type) # dataset file must include 'question' field
     needs_chat = args.use_chat_template or any("messages" in row for row in dataset)
     tokenizer = None
     if needs_chat:
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True)
+        tokenizer = AutoTokenizer.from_pretrained(exact_dir if args.query_peft_dir else args.model_name_or_path, use_fast=True)
         
     instruction_prompt = get_reasoning_prompt("default") if args.instruction_type == "reasoning" else \
                          get_answer_only_prompt("default")
@@ -149,58 +181,21 @@ def main() -> None:
         + "<answer>" for entry in prompt_entries]
     references = [extract_reference(row) for row in dataset]
 
-    answer_params = SamplingParams(
-        temperature=args.temperature,
-        top_p=args.top_p,
-        max_tokens=args.max_new_tokens,
-        stop=["</answer>"],
-        seed=args.seed,
-    )
-
-    llm = None
-    if not args.dry_run:
-        llm = LLM(
-            model=args.model_name_or_path,
-            tensor_parallel_size=args.tensor_parallel_size,
-            gpu_memory_utilization=args.gpu_memory_utilization,
-            enable_lora=bool(args.lora_path),
-        )
-
-    lora_request = None
-    if args.lora_path:
-        lora_request = LoRARequest("eval_adapter", 1, args.lora_path)
-
     outputs = []
-    if args.dry_run:
-        # Simulate progress without inference
-        pbar = tqdm(total=len(prompts), desc="vLLM generation (dry-run)", unit="ex")
-        if args.batch_size and args.batch_size > 0:
-            for idx in range(0, len(prompts), args.batch_size):
-                batch_prompts = prompts[idx : idx + args.batch_size]
-                # Simulate latency
-                time.sleep(0.01)
-                outputs.extend([{"outputs": [{"text": ""}]} for _ in batch_prompts])
-                pbar.update(len(batch_prompts))
-        else:
-            time.sleep(0.01)
-            outputs = [{"outputs": [{"text": ""}]} for _ in prompts]
-            pbar.update(len(prompts))
+    if args.batch_size and args.batch_size > 0:
+        pbar = tqdm(total=len(prompts), desc="vLLM generation", unit="ex")
+        for idx in range(0, len(prompts), args.batch_size):
+            batch_prompts = prompts[idx : idx + args.batch_size]
+            outputs.extend(
+                llm.generate(batch_prompts, answer_params, use_tqdm=False)
+            )
+            pbar.update(len(batch_prompts))
         pbar.close()
     else:
-        if args.batch_size and args.batch_size > 0:
-            pbar = tqdm(total=len(prompts), desc="vLLM generation", unit="ex")
-            for idx in range(0, len(prompts), args.batch_size):
-                batch_prompts = prompts[idx : idx + args.batch_size]
-                outputs.extend(
-                    llm.generate(batch_prompts, answer_params, lora_request=lora_request, use_tqdm=False)
-                )
-                pbar.update(len(batch_prompts))
-            pbar.close()
-        else:
-            pbar = tqdm(total=len(prompts), desc="vLLM generation", unit="ex")
-            outputs = llm.generate(prompts, answer_params, lora_request=lora_request, use_tqdm=False)
-            pbar.update(len(prompts))
-            pbar.close()
+        pbar = tqdm(total=len(prompts), desc="vLLM generation", unit="ex")
+        outputs = llm.generate(prompts, answer_params, use_tqdm=False)
+        pbar.update(len(prompts))
+        pbar.close()
 
     records: List[Dict[str, Any]] = []
     exact_matches = 0
@@ -217,48 +212,27 @@ def main() -> None:
             stop=["</confidence>"],
             seed=args.seed,
         )
-        if args.dry_run:
-            # Simulate confidence generation
-            pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence gen (dry-run)", unit="ex")
-            if args.batch_size and args.batch_size > 0:
-                conf_outputs = []
-                for idx in range(0, len(confidence_prompts), args.batch_size):
-                    conf_batch = confidence_prompts[idx : idx + args.batch_size]
-                    time.sleep(0.01)
-                    conf_outputs.extend([{"outputs": [{"text": ""}]} for _ in conf_batch])
-                    pbar_conf.update(len(conf_batch))
-            else:
-                time.sleep(0.01)
-                conf_outputs = [{"outputs": [{"text": ""}]} for _ in confidence_prompts]
-                pbar_conf.update(len(confidence_prompts))
-            pbar_conf.close()
-            confidence_outputs = [out["outputs"][0]["text"] for out in conf_outputs]
-        else:
-            if args.batch_size and args.batch_size > 0:
-                pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence generation", unit="ex")
-                conf_outputs = []
-                for idx in range(0, len(confidence_prompts), args.batch_size):
-                    conf_batch = confidence_prompts[idx : idx + args.batch_size]
-                    conf_outputs.extend(
-                        llm.generate(conf_batch, confidence_params, lora_request=lora_request, use_tqdm=False)
-                    )
-                    pbar_conf.update(len(conf_batch))
-                pbar_conf.close()
-            else:
-                pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence generation", unit="ex")
-                conf_outputs = llm.generate(
-                    confidence_prompts, confidence_params, lora_request=lora_request, use_tqdm=False
+        if args.batch_size and args.batch_size > 0:
+            pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence generation", unit="ex")
+            conf_outputs = []
+            for idx in range(0, len(confidence_prompts), args.batch_size):
+                conf_batch = confidence_prompts[idx : idx + args.batch_size]
+                conf_outputs.extend(
+                    llm.generate(conf_batch, confidence_params, use_tqdm=False)
                 )
-                pbar_conf.update(len(confidence_prompts))
-                pbar_conf.close()
-            confidence_outputs = [out.outputs[0].text for out in conf_outputs]
+                pbar_conf.update(len(conf_batch))
+            pbar_conf.close()
+        else:
+            pbar_conf = tqdm(total=len(confidence_prompts), desc="Confidence generation", unit="ex")
+            conf_outputs = llm.generate(
+                confidence_prompts, confidence_params, use_tqdm=False
+            )
+            pbar_conf.update(len(confidence_prompts))
+            pbar_conf.close()
+        confidence_outputs = [out.outputs[0].text for out in conf_outputs]
 
     generated_texts: List[str]
-    # Normalize outputs for dry-run vs real outputs
-    if args.dry_run:
-        generated_texts = [out["outputs"][0]["text"] for out in outputs]
-    else:
-        generated_texts = [out.outputs[0].text for out in outputs]
+    generated_texts = [out.outputs[0].text for out in outputs]
 
     for idx, (prompt, completion, reference) in enumerate(zip(prompts, generated_texts, references)):
         rec: Dict[str, Any] = {
