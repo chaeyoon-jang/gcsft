@@ -24,6 +24,7 @@ from transformers.trainer import (
     Trainer,
 )
 from peft import LoraConfig, get_peft_model
+from utils.prompt_hub import get_check_prompt
 
 try:
     import wandb
@@ -46,6 +47,7 @@ def parse_args():
     parser.add_argument("--confidence_input_key", type=str, default="conf_input_single")
     parser.add_argument("--prompt_key", type=str, default="input_prompt")
     parser.add_argument("--response_key", type=str, default="predicted_answer")
+    parser.add_argument("--check_prompt", action="store_true", default=False)
     parser.add_argument("--train_type", required=True, 
                         choices=["single_ruler_4k", "single_ruler_8k",  
                                  "single_gsm", "single_math", "multi"])
@@ -165,7 +167,6 @@ class CalibrationTuner(Trainer):
             args=args,
             processing_class=tokenizer,
             train_dataset=train_dataset,
-            #data_collator=self._collate_fn,
             data_collator=default_collate,
         )
 
@@ -348,11 +349,26 @@ def load_datasets(args):
         train_df = pd.read_csv(base_path / f"{data_name}_train.csv").dropna()
         eval_df = pd.read_csv(base_path / f"{data_name}_valid.csv").dropna()
         
+        if args.check_prompt:
+            check_prompt_text = get_check_prompt("evidence" if "ruler" in data_name else "reasoning")
+            train_df[args.confidence_key] = [k + check_prompt_text for k in train_df[args.confidence_key]]
+            eval_df[args.confidence_key] = [k + check_prompt_text for k in eval_df[args.confidence_key]]
+        
     elif args.train_type == "multi":
         ruler_train_df = pd.read_csv(base_path / "ruler_4k_train.csv").dropna()
         ruler_eval_df = pd.read_csv(base_path / "ruler_4k_valid.csv").dropna()
+        
         gsm_train_df = pd.read_csv(base_path / "gsm_train.csv").dropna()
         gsm_eval_df = pd.read_csv(base_path / "gsm_valid.csv").dropna()
+        
+        if args.check_prompt:
+            check_prompt_text_ruler = get_check_prompt("evidence")
+            ruler_train_df[args.confidence_key] = [k + check_prompt_text_ruler for k in ruler_train_df[args.confidence_key]]
+            ruler_eval_df[args.confidence_key] = [k + check_prompt_text_ruler for k in ruler_eval_df[args.confidence_key]]
+            
+            check_prompt_text_gsm = get_check_prompt("reasoning")
+            gsm_train_df[args.confidence_key] = [k + check_prompt_text_gsm for k in gsm_train_df[args.confidence_key]]
+            gsm_eval_df[args.confidence_key] = [k + check_prompt_text_gsm for k in gsm_eval_df[args.confidence_key]]
         
         train_df = pd.concat([ruler_train_df, gsm_train_df], ignore_index=True)
         eval_df = pd.concat([ruler_eval_df, gsm_eval_df], ignore_index=True)
@@ -423,16 +439,16 @@ def main(args):
 
     set_seed(args.seed)
     
-    sub_dir = f"{args.model_name.split('/')[-1]}_csft_{args.train_type}_seed{args.seed}_lr{args.learning_rate}_kl{args.kl_decay}"
+    sub_dir = f"{args.model_name.split('/')[-1]}_csft_{args.train_type}_seed{args.seed}_lr{args.learning_rate}_kl{args.kl_decay}_bs{args.batch_size}_gs{args.gradient_accumulation_steps}_ms{args.max_steps}_ck{int(args.check_prompt)}"
     output_dir = Path(args.log_dir) / sub_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     
     train_ds, eval_ds = load_datasets(args)
     cols_to_keep = [
-        args.prompt_key,                # "input_prompt"
-        args.response_key,              # "predicted_answer"
-        args.confidence_input_key,      # "conf_input_single"
-        args.confidence_key,            # "conf_label_single"
+        args.prompt_key,            
+        args.response_key,             
+        args.confidence_input_key,     
+        args.confidence_key,            
         "task_type"
     ]
     cols_to_remove = [col for col in train_ds.column_names if col not in cols_to_keep]

@@ -39,10 +39,24 @@ CONFIDENCE_PROMPTS: Dict[str, str] = {
     ),
 }
 
+CHECK_PROMPTS: Dict[str, str] = {
+    "evidence": (
+        "\nI have made a best effort to use the available evidence, which may still be useful as a reference. However, I am not fully confident that all relevant information has been accounted for. User review is recommended."
+    ),
+    "reasoning": (
+        "\nI have worked through the problem with a detailed solution process that may be helpful as a reference. However, I am not fully confident in the final answer, and the user is encouraged to review the solution carefully."
+    ),
+}
+
 def get_confidence_prompt(name: str = "default") -> str:
     if name not in CONFIDENCE_PROMPTS:
         raise KeyError(f"Unknown confidence prompt: {name}")
     return CONFIDENCE_PROMPTS[name]
+
+def get_check_prompt(name: str = "evidence") -> str:
+    if name not in CHECK_PROMPTS:
+        raise KeyError(f"Unknown check prompt: {name}")
+    return CHECK_PROMPTS[name]
 
 def get_reasoning_prompt(name: str = "default") -> str:
     if name not in REASONING_PROMPTS:
