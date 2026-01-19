@@ -144,7 +144,7 @@ def main() -> None:
         if not os.path.isdir(exact_dir):
             from transformers import AutoModelForCausalLM
             from peft import PeftModel
-            model = AutoModelForCausalLM.from_pretraineda(args.model_name_or_path, 
+            model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, 
                                                          device_map="auto", 
                                                          torch_dtype="auto")
             model = PeftModel.from_pretrained(model, args.query_peft_dir)

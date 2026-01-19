@@ -56,6 +56,7 @@ run_evaluation() {
         --tensor_parallel_size "${TENSOR_PARALLEL_SIZE}"
         --gpu_memory_utilization "${GPU_MEMORY_UTILIZATION}"
         --add_conf
+        --data_type test
     )
     
     [ "${USE_CHAT_TEMPLATE}" = "true" ] && args+=(--use_chat_template)
@@ -82,31 +83,31 @@ run_evaluation() {
 #     32 \
 #     "You are an expert assistant that provides clear and helpful answers."
 
-# run_evaluation \
-#     "llama_3b" \
-#     "meta-llama/Llama-3.2-3B-Instruct" \
-#     "openai/gsm8k" \
-#     "gsm" \
-#     "reasoning" \
-#     "logs/zero_shot_test_evals" \
-#     4096 \
-#     32 \
-#     "You are an expert assistant that provides clear and helpful answers."
+run_evaluation \
+    "llama_3b" \
+    "meta-llama/Llama-3.2-3B-Instruct" \
+    "openai/gsm8k" \
+    "gsm" \
+    "reasoning" \
+    "logs/zero_shot_test_evals" \
+    4096 \
+    32 \
+    "You are an expert assistant that provides clear and helpful answers."
 
 # ============================================================================
 # 2. Qwen3-8B Evaluations
 # ============================================================================
 # print_header "Qwen3-8B Evaluations"
 
-run_evaluation \
-    "qwen_8b" \
-    "Qwen/Qwen3-8B" \
-    "data/processed/math_test.csv" \
-    "math" \
-    "reasoning" \
-    "logs/zero_shot_test_evals" \
-    4096 \
-    16
+# run_evaluation \
+#     "qwen_8b" \
+#     "Qwen/Qwen3-8B" \
+#     "data/processed/math_test.csv" \
+#     "math" \
+#     "reasoning" \
+#     "logs/zero_shot_test_evals" \
+#     4096 \
+#     16
 
 # run_evaluation \
 #     "qwen_8b" \
@@ -146,40 +147,40 @@ run_evaluation \
 # ============================================================================
 # 4. Qwen3-4B Evaluation (if using HuggingFace model)
 # ============================================================================
-print_header "Qwen3-4B Evaluation"
+# print_header "Qwen3-4B Evaluation"
 
-run_evaluation \
-    "qwen_4b" \
-    "Qwen/Qwen3-4B" \
-    "data/processed/math_test.csv" \
-    "math" \
-    "reasoning" \
-    "logs/zero_shot_test_evals" \
-    4096 \
-    32
+# run_evaluation \
+#     "qwen_4b" \
+#     "Qwen/Qwen3-4B" \
+#     "data/processed/math_test.csv" \
+#     "math" \
+#     "reasoning" \
+#     "logs/zero_shot_test_evals" \
+#     4096 \
+#     32
 
-run_evaluation \
-    "qwen_4b" \
-    "Qwen/Qwen3-4B" \
-    "data/processed/ruler_4k_test.jsonl" \
-    "ruler_4k" \
-    "answer_only" \
-    "logs/zero_shot_test_evals" \
-    50 \
-    32
+# run_evaluation \
+#     "qwen_4b" \
+#     "Qwen/Qwen3-4B" \
+#     "data/processed/ruler_4k_test.jsonl" \
+#     "ruler_4k" \
+#     "answer_only" \
+#     "logs/zero_shot_test_evals" \
+#     50 \
+#     32
 
 # ============================================================================
 # Summary
 # ============================================================================
-print_header "All evaluations completed!"
+# print_header "All evaluations completed!"
 
-echo -e "${GREEN}Test results saved in: logs/zero_shot_test_evals/${NC}"
-ls -lh logs/zero_shot_test_evals/*.jsonl 2>/dev/null || echo "No output files found"
+# echo -e "${GREEN}Test results saved in: logs/zero_shot_test_evals/${NC}"
+# ls -lh logs/zero_shot_test_evals/*.jsonl 2>/dev/null || echo "No output files found"
 
-echo -e "\n${YELLOW}Summary of generated files:${NC}"
-find logs/zero_shot_test_evals -name "*_test.jsonl" -type f 2>/dev/null | sort | while read f; do
-    size=$(du -h "$f" | cut -f1)
-    echo "  - $(basename $f) ($size)"
-done
+# echo -e "\n${YELLOW}Summary of generated files:${NC}"
+# find logs/zero_shot_test_evals -name "*_test.jsonl" -type f 2>/dev/null | sort | while read f; do
+#     size=$(du -h "$f" | cut -f1)
+#     echo "  - $(basename $f) ($size)"
+# done
 
-echo ""
+# echo ""
