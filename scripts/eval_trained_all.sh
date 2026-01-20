@@ -211,7 +211,7 @@ run_evaluation() {
 
 MODEL_NAME="Llama-3.2-3B-Instruct"
 BASE_MODEL_PATH="meta-llama/Llama-3.2-3B-Instruct"
-OUTPUT_BASE_DIR="./logs/zero_shot_test_evals"
+OUTPUT_BASE_DIR="./logs/multi_trained_test_evals"
 
 CHECKPOINTS=(
     "/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0/checkpoint-2000"

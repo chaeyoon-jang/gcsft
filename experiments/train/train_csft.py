@@ -351,8 +351,10 @@ def load_datasets(args):
         
         if args.check_prompt:
             check_prompt_text = get_check_prompt("evidence" if "ruler" in data_name else "reasoning")
-            train_df[args.confidence_key] = [k + check_prompt_text for k in train_df[args.confidence_key]]
-            eval_df[args.confidence_key] = [k + check_prompt_text for k in eval_df[args.confidence_key]]
+            train_df[args.confidence_key] = [train_df[args.confidence_key][i] + check_prompt_text if int(train_df[args.confidence_key][i].split("<confidence>")[-1].split("</confidence>")[0]) < 50 else train_df[args.confidence_key][i] for i in range(len(train_df))]
+            eval_df[args.confidence_key] = [eval_df[args.confidence_key][i] + check_prompt_text if int(eval_df[args.confidence_key][i].split("<confidence>")[-1].split("</confidence>")[0]) < 50 else eval_df[args.confidence_key][i] for i in range(len(eval_df))]
+            #train_df[args.confidence_key] = [k + check_prompt_text for k in train_df[args.confidence_key]]
+            #eval_df[args.confidence_key] = [k + check_prompt_text for k in eval_df[args.confidence_key]]
         
     elif args.train_type == "multi":
         ruler_train_df = pd.read_csv(base_path / "ruler_4k_train.csv").dropna()
@@ -363,12 +365,14 @@ def load_datasets(args):
         
         if args.check_prompt:
             check_prompt_text_ruler = get_check_prompt("evidence")
-            ruler_train_df[args.confidence_key] = [k + check_prompt_text_ruler for k in ruler_train_df[args.confidence_key]]
-            ruler_eval_df[args.confidence_key] = [k + check_prompt_text_ruler for k in ruler_eval_df[args.confidence_key]]
+            ruler_train_df[args.confidence_key] = [ruler_train_df[args.confidence_key][i] + check_prompt_text_ruler if int(ruler_train_df[args.confidence_key][i].split("<evidence_confidence>")[-1].split("</evidence_confidence>")[0]) < 50 else ruler_train_df[args.confidence_key][i] for i in range(len(ruler_train_df))]
+            ruler_eval_df[args.confidence_key] = [ruler_eval_df[args.confidence_key][i] + check_prompt_text_ruler if int(ruler_eval_df[args.confidence_key][i].split("<evidence_confidence>")[-1].split("</evidence_confidence>")[0]) < 50 else ruler_eval_df[args.confidence_key][i] for i in range(len(ruler_eval_df))]
             
             check_prompt_text_gsm = get_check_prompt("reasoning")
-            gsm_train_df[args.confidence_key] = [k + check_prompt_text_gsm for k in gsm_train_df[args.confidence_key]]
-            gsm_eval_df[args.confidence_key] = [k + check_prompt_text_gsm for k in gsm_eval_df[args.confidence_key]]
+            #gsm_train_df[args.confidence_key] = [k + check_prompt_text_gsm for k in gsm_train_df[args.confidence_key]]
+            #gsm_eval_df[args.confidence_key] = [k + check_prompt_text_gsm for k in gsm_eval_df[args.confidence_key]]
+            gsm_train_df[args.confidence_key] = [gsm_train_df[args.confidence_key][i] + check_prompt_text_gsm if int(gsm_train_df[args.confidence_key][i].split("<reasoning_confidence>")[-1].split("</reasoning_confidence>")[0]) < 50 else gsm_train_df[args.confidence_key][i] for i in range(len(gsm_train_df))]
+            gsm_eval_df[args.confidence_key] = [gsm_eval_df[args.confidence_key][i] + check_prompt_text_gsm if int(gsm_eval_df[args.confidence_key][i].split("<reasoning_confidence>")[-1].split("</reasoning_confidence>")[0]) < 50 else gsm_eval_df[args.confidence_key][i] for i in range(len(gsm_eval_df))] 
         
         train_df = pd.concat([ruler_train_df, gsm_train_df], ignore_index=True)
         eval_df = pd.concat([ruler_eval_df, gsm_eval_df], ignore_index=True)

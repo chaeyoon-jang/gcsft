@@ -72,27 +72,27 @@ run_evaluation() {
 # ============================================================================
 # print_header "LLaMA-3.2-3B Evaluations"
 
-# run_evaluation \
-#     "llama_3b" \
-#     "meta-llama/Llama-3.2-3B-Instruct" \
-#     "data/processed/ruler_4k_test.jsonl" \
-#     "ruler_4k" \
-#     "answer_only" \
-#     "logs/zero_shot_test_evals" \
-#     50 \
-#     32 \
-#     "You are an expert assistant that provides clear and helpful answers."
-
 run_evaluation \
     "llama_3b" \
     "meta-llama/Llama-3.2-3B-Instruct" \
-    "openai/gsm8k" \
-    "gsm" \
-    "reasoning" \
+    "data/processed/ruler_8k_test.jsonl" \
+    "ruler_8k" \
+    "answer_only" \
     "logs/zero_shot_test_evals" \
-    4096 \
+    50 \
     32 \
     "You are an expert assistant that provides clear and helpful answers."
+
+# run_evaluation \
+#     "llama_3b" \
+#     "meta-llama/Llama-3.2-3B-Instruct" \
+#     "openai/gsm8k" \
+#     "gsm" \
+#     "reasoning" \
+#     "logs/zero_shot_test_evals" \
+#     4096 \
+#     32 \
+#     "You are an expert assistant that provides clear and helpful answers."
 
 # ============================================================================
 # 2. Qwen3-8B Evaluations
