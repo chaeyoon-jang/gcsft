@@ -75,12 +75,12 @@ run_evaluation() {
 run_evaluation \
     "llama_3b" \
     "meta-llama/Llama-3.2-3B-Instruct" \
-    "data/processed/ruler_8k_test.jsonl" \
-    "ruler_8k" \
-    "answer_only" \
+    "data/processed/contract_nli_test.csv" \
+    "contract_nli" \
+    "reasoning" \
     "logs/zero_shot_test_evals" \
-    50 \
-    32 \
+    4096 \
+    16 \
     "You are an expert assistant that provides clear and helpful answers."
 
 # run_evaluation \

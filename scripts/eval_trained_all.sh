@@ -211,12 +211,16 @@ run_evaluation() {
 
 MODEL_NAME="Llama-3.2-3B-Instruct"
 BASE_MODEL_PATH="meta-llama/Llama-3.2-3B-Instruct"
-OUTPUT_BASE_DIR="./logs/multi_trained_test_evals"
+OUTPUT_BASE_DIR="./logs/multi_trained_test_evals_final"
 
 CHECKPOINTS=(
-    "/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0/checkpoint-2000"
-    "/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0_bs1_gs32_ms2000_ck1/checkpoint-2000"
-    "/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0_prev/checkpoint-2000"
+    #"/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0/checkpoint-2000"
+    #"/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0_bs1_gs32_ms2000_ck1/checkpoint-2000"
+    #"/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0_prev/checkpoint-2000"
+    #"/mnt/home/chaeyun-jang/gcsft/logs/llama/final/Llama-3.2-3B-Instruct_csft_multi_seed0_lr0.0001_kl1.0_bs1_gs32_ms2000_ck0/checkpoint-2000"
+    #"/mnt/home/chaeyun-jang/gcsft/logs/llama/final/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0/checkpoint-600"
+    #"/mnt/home/chaeyun-jang/gcsft/logs/llama/final/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1/checkpoint-800"
+    "/mnt/home/chaeyun-jang/gcsft/logs/llama/final/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0/checkpoint-800"
 )
 
 declare -A DATASETS=(
@@ -224,6 +228,7 @@ declare -A DATASETS=(
     [ruler_8k]="data/processed/ruler_8k_test.jsonl"
     [gsm]="openai/gsm8k"
     [math]="data/processed/math_test.csv"
+    [contract_nli]="data/processed/contract_nli_test.csv"
 )
 
 declare -A INSTRUCTIONS=(
@@ -231,6 +236,7 @@ declare -A INSTRUCTIONS=(
     [ruler_8k]="answer_only"
     [gsm]="reasoning"
     [math]="reasoning"
+    [contract_nli]="reasoning"
 )
 
 declare -A MAX_TOKENS=(
@@ -238,6 +244,7 @@ declare -A MAX_TOKENS=(
     [ruler_8k]=50
     [gsm]=4096
     [math]=4096
+    [contract_nli]=4096
 )
 
 declare -A BATCH_SIZES=(
@@ -245,6 +252,7 @@ declare -A BATCH_SIZES=(
     [ruler_8k]=32
     [gsm]=32
     [math]=32
+    [contract_nli]=16
 )
 
 print_header "Starting extended evaluations for ${MODEL_NAME}"
@@ -254,7 +262,8 @@ for ckpt in "${CHECKPOINTS[@]}"; do
     ckpt_base=$(basename "${ckpt}")
     out_dir="${OUTPUT_BASE_DIR}/${parent_dir}_${ckpt_base}"
 
-    for dataset in ruler_4k ruler_8k gsm math; do
+    for dataset in ruler_4k ruler_8k gsm math contract_nli; do
+    #for dataset in contract_nli; do
         eval_file="${DATASETS[$dataset]}"
         instruction_type="${INSTRUCTIONS[$dataset]}"
         max_tokens="${MAX_TOKENS[$dataset]}"

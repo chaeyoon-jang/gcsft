@@ -7,6 +7,6 @@ python -m experiments.train.train_csft \
   --gradient_accumulation_steps 32 \
   --learning_rate 1e-04 \
   --use_lora \
-  --confidence_key conf_label_multi \
-  --confidence_input_key conf_input_multi \
+  --confidence_key conf_label_single \
+  --confidence_input_key conf_input_single \
   --kl_decay 1.0 
