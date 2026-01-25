@@ -11,7 +11,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from trl import GRPOConfig, GRPOTrainer
 
-from utils.reward_func import brier_reward, log_loss_reward
+from utils.reward_func import brier_reward, log_loss_reward, strict_confidence_reward
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,16 +29,16 @@ def parse_args() -> argparse.Namespace:
     # Generation parameters
     parser.add_argument("--max_seq_length", type=int, default=4096)
     parser.add_argument("--max_prompt_length", type=int, default=3000)
-    parser.add_argument("--max_completion_length", type=int, default=50)
-    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--max_completion_length", type=int, default=10)
+    parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)
     
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=1, help="Per device batch size")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=8)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=32)
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--max_steps", type=int, default=2000)
-    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--learning_rate", type=float, default=1e-5)
     parser.add_argument("--kl_decay", type=float, default=1.0, help="KL divergence weight decay")
     parser.add_argument("--seed", type=int, default=42)
     
@@ -55,8 +55,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ref_adapter_name", default="reference", help="Reference adapter name for KL")
     
     # Reward function
-    parser.add_argument("--reward_mode", choices=["brier", "log_loss"], default="brier", help="Reward function type")
-    parser.add_argument("--reward_format_pattern", default="tac", help="Expected format pattern (tac, tbac, etc.)")
+    parser.add_argument(
+        "--reward_mode",
+        choices=["brier", "log_loss", "strict_conf"],
+        default="brier",
+        help="Reward function type",
+    )
     parser.add_argument("--log_loss_epsilon", type=float, default=1e-4, help="Epsilon for log-loss to prevent -inf")
     
     # Other
@@ -90,24 +94,7 @@ def load_datasets(args):
     return train_ds, eval_ds
 
 
-def resize_token_embeddings(tokenizer, model):
-    extra_token_count = len(tokenizer) - model.get_input_embeddings().weight.data.size(0)
-    if extra_token_count:
-        model.resize_token_embeddings(len(tokenizer))
 
-        input_embeddings = model.get_input_embeddings().weight.data
-
-        input_embeddings[-extra_token_count:] = input_embeddings[
-            :-extra_token_count
-        ].mean(dim=0, keepdim=True)
-
-        output_embeddings = model.get_output_embeddings().weight.data
-
-        output_embeddings[-extra_token_count:] = output_embeddings[
-            :-extra_token_count
-        ].mean(dim=0, keepdim=True)
-        
-        
 def load_model_and_tokenizer(args):
     print(f"Loading model: {args.model_name}")
     
@@ -120,12 +107,9 @@ def load_model_and_tokenizer(args):
     # Keep the end of the prompt (contains question + confidence instruction) if truncation happens
     tokenizer.truncation_side = "left"
     
-    # Set pad token if not exists
+    # Set pad token - use EOS token to avoid out-of-bounds issues
     if tokenizer.pad_token is None:
-        if "Llama" in args.model_name:
-            tokenizer.add_special_tokens({"pad_token": "[PAD]"})
-        else:
-            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token = tokenizer.eos_token
     
     torch_dtype = torch.float16 if not torch.cuda.is_bf16_supported() else torch.bfloat16
     model = AutoModelForCausalLM.from_pretrained(
@@ -133,8 +117,6 @@ def load_model_and_tokenizer(args):
         torch_dtype=torch_dtype,
         device_map="auto",
     )
-    if "Llama" in args.model_name and tokenizer.pad_token == "[PAD]":
-        resize_token_embeddings(tokenizer, model)
     
     model.config.pad_token_id = tokenizer.pad_token_id
     print("Model loaded successfully.")
@@ -226,7 +208,9 @@ def main(args):
         "vllm_device": args.vllm_device,
         "vllm_gpu_memory_utilization": args.vllm_gpu_memory_utilization,
         "deepspeed": args.deepspeed,
-        "chat_template_kwargs": {},  # Disable chat template - prompts are already formatted
+        "scale_rewards": False, 
+        "loss_type": "dr_grpo",  
+        #"chat_template_kwargs": {},  # Disable chat template - prompts are already formatted
         "beta": args.kl_decay,  # KL divergence penalty weight
     }
     allowed_keys = {field.name for field in fields(GRPOConfig)}
@@ -256,7 +240,6 @@ def main(args):
 
     def brier_reward_fn(prompts: List[str], completions: List[str], **kwargs: Any) -> List[float]:
         rewards = brier_reward(
-            args.reward_format_pattern,
             completions,
             kwargs.get("tf") or [],
         )
@@ -267,7 +250,6 @@ def main(args):
         prompts: List[str], completions: List[str], **kwargs: Any
     ) -> List[float]:
         rewards = log_loss_reward(
-            args.reward_format_pattern,
             completions,
             kwargs.get("tf") or [],
             epsilon=args.log_loss_epsilon,
@@ -275,12 +257,20 @@ def main(args):
         _maybe_debug_print(prompts, completions, rewards)
         return rewards
 
+    def strict_conf_reward_fn(prompts: List[str], completions: List[str], **kwargs: Any) -> List[float]:
+        rewards = strict_confidence_reward(completions)
+        _maybe_debug_print(prompts, completions, rewards)
+        return rewards
+
     if args.reward_mode == "brier":
-        reward_funcs = [brier_reward_fn]
+        reward_funcs = [brier_reward_fn] #, strict_conf_reward_fn]
         print("Using Brier score reward")
     elif args.reward_mode == "log_loss":
         reward_funcs = [log_loss_reward_fn]
         print("Using Log-loss reward")
+    elif args.reward_mode == "strict_conf":
+        reward_funcs = [strict_conf_reward_fn]
+        print("Using strict confidence format reward")
     else:
         raise ValueError(f"Unknown reward mode: {args.reward_mode}")
 

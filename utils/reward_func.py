@@ -53,97 +53,155 @@ def format_reward(format_pattern: str, completions: Iterable, **kwargs) -> List[
     return matches
 
 
+def strict_confidence_reward(completions: Iterable, **kwargs) -> List[float]:
+    """
+    Reward only if the completion ends with a well-formed confidence tag.
+    Expected suffix: <confidence>0-100</confidence> with no trailing text.
+    """
+    pattern = r"<confidence>\s*([0-9]+(?:\.[0-9]+)?)\s*</confidence>\s*$"
+
+    normalized = _normalize_completions(completions)
+    completion_contents = [completion[0]["content"] for completion in normalized]
+    rewards: List[float] = []
+
+    for content in completion_contents:
+        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
+        if not match:
+            rewards.append(0.0)
+            continue
+
+        try:
+            conf_val = float(match.group(1))
+        except ValueError:
+            rewards.append(0.0)
+            continue
+
+        if 0.0 <= conf_val <= 100.0:
+            rewards.append(1.0)
+        else:
+            rewards.append(0.0)
+
+    return rewards
+
+
+
+
+import re, math
+from typing import Iterable, List, Optional, Tuple
+
+# completion starts right after "<confidence>" (opening tag is in the prompt)
+# So the first thing the model outputs should be a number, then </confidence>.
+_START_CLOSE_RE = re.compile(
+    r"^\s*([+-]?\d+(?:\.\d+)?)\s*%?\s*</confidence>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+# optional fallback: model outputs its own <confidence> ... </confidence>
+_TAGGED_RE = re.compile(
+    r"<confidence>\s*([+-]?\d+(?:\.\d+)?)\s*%?\s*</confidence>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+
+def _extract_confidence_0_1_from_completion_start(content: str) -> Optional[float]:
+    """
+    Enforce: the FIRST token after the provided '<confidence>' (i.e., at the start of completion)
+    must be numeric and followed by '</confidence>'.
+    Confidence is assumed in [0, 100], mapped to [0, 1].
+    """
+    if not content:
+        return None
+
+    m = _START_CLOSE_RE.search(content)
+    if m:
+        raw = m.group(1)
+    else:
+        # fallback (optional): if the model redundantly prints <confidence>...</confidence> itself
+        ms = _TAGGED_RE.findall(content)
+        if not ms:
+            return None
+        raw = ms[-1]
+
+    try:
+        conf_100 = float(raw)
+    except ValueError:
+        return None
+
+    conf = conf_100 * 0.01
+    if math.isnan(conf) or math.isinf(conf):
+        return None
+    return max(0.0, min(conf, 1.0))
 
 
 def brier_reward(
-    format_pattern: str,
     completions: Iterable,
     correctness: Iterable[int],
+    missing_penalty: float = -1.25,
+    invalid_penalty: float = -1.25,
+    reward_clip: Tuple[float, float] = (-1.0, 0.0),
     **kwargs,
 ) -> List[float]:
     """
-    Calculate Brier score as reward.
-    Brier score = (confidence - correctness)^2
-    where correctness is 0 or 1 from the data.
-    Confidence is expected to be in range [0, 100] and will be normalized to [0, 1].
-    If confidence is not found, returns 0 reward (penalty for not generating confidence).
+    Reward = -(conf - y)^2, where conf in [0,1], y in {0,1}.
+    Enforces that completion starts with numeric confidence followed by </confidence>.
+    Missing/invalid gets strong negative penalty (prevents 'skip' hacking).
     """
-    confidence_pattern = r"(.*?)</confidence>"
     normalized = _normalize_completions(completions)
-    completion_contents = [completion[0]["content"] for completion in normalized]
-    matches = []
-    
-    correctness_list = list(correctness)
-    
-    for content, correctness_val in zip(completion_contents, correctness_list):
-        confidence_matches = re.findall(confidence_pattern, content, re.DOTALL | re.MULTILINE)
-        last_confidence = confidence_matches[-1] if confidence_matches else None
-        
-        if last_confidence is None:
-            # No confidence found - return penalty (0 is worst)
-            matches.append(-2.0)
-        else:
-            try:
-                conf = float(last_confidence.strip())
-                # Normalize confidence from [0, 100] to [0, 1]
-                conf = conf * 0.01
-                conf = max(0.0, min(conf, 1.0))
-                # Brier score: (confidence - correctness)^2
-                # Negate because lower brier is better, but GRPO maximizes reward
-                brier = (conf - correctness_val) ** 2
-                matches.append(-brier)
-            except ValueError:
-                # Parsing failed - return 0 reward (penalty)
-                matches.append(0.0)
+    contents = [c[0]["content"] for c in normalized]
+    ys = list(correctness)
 
-    return matches
+    out: List[float] = []
+    for content, y in zip(contents, ys):
+        conf = _extract_confidence_0_1_from_completion_start(content)
+
+        if conf is None:
+            # differentiate "no closing tag at all" vs "has closing but malformed"
+            pen = missing_penalty if "</confidence>" not in (content or "") else invalid_penalty
+            r = pen
+        else:
+            r = -((conf - float(y)) ** 2)  # in [-1, 0]
+
+        lo, hi = reward_clip
+        r = max(lo, min(r, hi))
+        out.append(float(r))
+
+    return out
 
 
 def log_loss_reward(
-    format_pattern: str,
     completions: Iterable,
     correctness: Iterable[int],
     epsilon: float = 1e-4,
+    missing_penalty: float = -10.0,
+    invalid_penalty: float = -10.0,
+    reward_clip: Tuple[float, float] = (-10.0, 0.0),
     **kwargs,
 ) -> List[float]:
     """
-    Calculate log-loss (negative log-likelihood) as reward.
-    - If correctness = 1: reward = -log(confidence)
-    - If correctness = 0: reward = -log(1 - confidence)
-    Confidence is expected to be in range [0, 100] and will be normalized to [0, 1].
-    If confidence is not found, returns 0 reward (penalty for not generating confidence).
+    Reward keeps original log-loss semantics but in reward form:
+      y=1: reward = log(conf)
+      y=0: reward = log(1-conf)
+    Both <= 0. Uses epsilon + clipping for stability and anti-exploit.
+    Enforces completion starts with numeric confidence followed by </confidence>.
     """
-    confidence_pattern = r"<confidence>(.*?)</confidence>"
     normalized = _normalize_completions(completions)
-    completion_contents = [completion[0]["content"] for completion in normalized]
-    matches = []
-    
-    correctness_list = list(correctness)
+    contents = [c[0]["content"] for c in normalized]
+    ys = list(correctness)
 
-    for content, correctness_val in zip(completion_contents, correctness_list):
-        confidence_matches = re.findall(confidence_pattern, content, re.DOTALL | re.MULTILINE)
-        last_confidence = confidence_matches[-1] if confidence_matches else None
-        
-        if last_confidence is None:
-            # No confidence found - return penalty (0 is worst)
-            matches.append(0.0)
+    out: List[float] = []
+    for content, y in zip(contents, ys):
+        conf = _extract_confidence_0_1_from_completion_start(content)
+
+        if conf is None:
+            pen = missing_penalty if "</confidence>" not in (content or "") else invalid_penalty
+            r = pen
         else:
-            try:
-                conf = float(last_confidence.strip())
-                # Normalize confidence from [0, 100] to [0, 1]
-                conf = conf * 0.01
-                conf = max(0.0, min(conf, 1.0))
-                # Log-loss calculation
-                # Lower loss is better, but GRPO maximizes reward, so negate
-                if correctness_val == 1:
-                    # loss = log(1/confidence), negated for reward
-                    loss = math.log(max(conf, epsilon))
-                else:
-                    # loss = log(1/(1-confidence)), negated for reward
-                    loss = math.log(max(1 - conf, epsilon))
-                matches.append(-loss)
-            except ValueError:
-                # Parsing failed - return 0 reward (penalty)
-                matches.append(0.0)
-    
-    return matches
+            if int(y) == 1:
+                r = math.log(max(conf, epsilon))          # <= 0
+            else:
+                r = math.log(max(1.0 - conf, epsilon))    # <= 0
+
+        lo, hi = reward_clip
+        r = max(lo, min(r, hi))
+        out.append(float(r))
+
+    return out

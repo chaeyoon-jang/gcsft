@@ -198,7 +198,6 @@ def main() -> None:
         pbar.close()
 
     records: List[Dict[str, Any]] = []
-    exact_matches = 0
     confidence_outputs: List[Optional[str]] = [None] * len(prompts)
     if args.add_conf:
         confidence_prompts = [
