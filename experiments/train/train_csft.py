@@ -62,6 +62,7 @@ def parse_args():
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--log_dir", type=str, default="logs")
     parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--task_sft", type=bool, default=False)
     return parser.parse_args()
 
 
@@ -342,7 +343,8 @@ def load_datasets(args):
     print("Loading datasets...")
     
     model_name_short = args.model_name.split("/")[-1]
-    base_path = Path("data/train_data") / model_name_short / "csft"
+    base_path = Path("data/train_data") / model_name_short / "csft_new" if not args.task_sft\
+        else Path("data/train_data") / model_name_short / "sft_base"
     
     if "single" in args.train_type:
         data_name = args.train_type.split("_", 1)[1]

@@ -1,6 +1,6 @@
 TEMPERATURE=${TEMPERATURE:-0.0}
 TOP_P=${TOP_P:-1.0}
-TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-1}
+TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-2}
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.9}
 USE_CHAT_TEMPLATE=${USE_CHAT_TEMPLATE:-true}
 
@@ -63,11 +63,12 @@ run_evaluation() {
 
 MODEL_NAME="Llama-3.2-3B-Instruct"
 BASE_MODEL_PATH="meta-llama/Llama-3.2-3B-Instruct"
-OUTPUT_BASE_DIR="./logs/zero_shot_test_evals"
+OUTPUT_BASE_DIR="./logs/trained_models"
 
 CHECKPOINTS=(
-    "/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1/checkpoint-1800",
-    "/mnt/home/chaeyun-jang/gcsft/logs/llama/ckpt/logs/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl1.0_bs1_gs32_ms2000_ck1/checkpoint-1400"
+    "/mnt/home/chaeyun-jang/gcsft/logs/grpo_experiments/Llama-3.2-3B-Instruct_brier_gsm_seed42_lr1e-05_kl0.6_bs1_gs32_ms1000/checkpoint-800"
+    "/mnt/home/chaeyun-jang/gcsft/logs/grpo_experiments/Llama-3.2-3B-Instruct_log_loss_gsm_seed42_lr1e-05_kl0.6_bs1_gs32_ms1000/checkpoint-400"
+    "/mnt/home/chaeyun-jang/gcsft/logs/grpo_experiments/Llama-3.2-3B-Instruct_log_loss_ruler_4k_seed42_lr1e-05_kl0.6_bs1_gs32_ms1000/checkpoint-400"
 )
 
 declare -A DATASETS=(
@@ -75,6 +76,7 @@ declare -A DATASETS=(
     [ruler_8k]="data/processed/ruler_8k_test.jsonl"
     [gsm]="openai/gsm8k"
     [math]="data/processed/math_test.csv"
+    [mmlu]="data/processed/mmlu_test.csv"
 )
 
 declare -A INSTRUCTIONS=(
@@ -82,13 +84,15 @@ declare -A INSTRUCTIONS=(
     [ruler_8k]="answer_only"
     [gsm]="reasoning"
     [math]="reasoning"
+    [mmlu]="answer_only"
 )
 
 declare -A MAX_TOKENS=(
-    [ruler_4k]=4096
-    [ruler_8k]=4096
-    [gsm]=50
-    [math]=50
+    [ruler_4k]=50
+    [ruler_8k]=50
+    [gsm]=4096
+    [math]=4096
+    [mmlu]=50
 )
 
 declare -A BATCH_SIZES=(
@@ -96,6 +100,7 @@ declare -A BATCH_SIZES=(
     [ruler_8k]=32
     [gsm]=32
     [math]=32
+    [mmlu]=32
 )
 
 print_header "Starting extended evaluations for ${MODEL_NAME}"
@@ -105,16 +110,12 @@ for ckpt in "${CHECKPOINTS[@]}"; do
     ckpt_base=$(basename "${ckpt}")
     out_dir="${OUTPUT_BASE_DIR}/${parent_dir}_${ckpt_base}"
 
-    for dataset in ruler_4k ruler_8k gsm math; do
+    for dataset in ruler_4k ruler_8k gsm math mmlu; do
+    #for dataset in gsm; do 
         eval_file="${DATASETS[$dataset]}"
         instruction_type="${INSTRUCTIONS[$dataset]}"
         max_tokens="${MAX_TOKENS[$dataset]}"
         batch_size="${BATCH_SIZES[$dataset]}"
-
-        if [ ! -f "${eval_file}" ]; then
-            echo -e "${YELLOW}⚠ Skipping: dataset not found ${eval_file}${NC}"
-            continue
-        fi
 
         run_evaluation \
             "${MODEL_NAME}" \

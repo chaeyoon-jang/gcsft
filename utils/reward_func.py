@@ -1,207 +1,158 @@
 import math
 import re
-from typing import Iterable, List
+from typing import List, Optional
 
 
-def _normalize_completions(completions: Iterable) -> List[List[dict]]:
-    normalized = []
-    for completion in completions:
-        if isinstance(completion, str):
-            normalized.append([{"content": completion}])
-        elif isinstance(completion, list):
-            normalized.append(completion)
-        else:
-            raise TypeError("Completion must be a string or list of dicts.")
-    return normalized
-
-
-
-
-
-def format_reward(format_pattern: str, completions: Iterable, **kwargs) -> List[float]:
+def extract_answer(completion: str) -> Optional[str]:
     """
-    Check if model-generated completion has correct format.
-    Since think/answer are already in the prompt, we only check the generated part (confidence).
-    Confidence is expected to be in range [0, 100].
+    Extract answer from <answer>...</answer> tags.
+    Returns the content inside the last occurrence of answer tags.
     """
-    confidence_pattern = r"(.*?)</confidence>"
+    pattern = r"<answer>(.*?)</answer>"
+    matches = re.findall(pattern, completion, re.DOTALL | re.IGNORECASE)
     
-    normalized = _normalize_completions(completions)
-    completion_contents = [completion[0]["content"] for completion in normalized]
-    matches = []
-    
-    for content in completion_contents:
-        # Check if confidence tag exists and is properly formatted
-        if "c" in format_pattern:
-            confidence_matches = re.findall(confidence_pattern, content, re.DOTALL | re.MULTILINE)
-            if not confidence_matches:
-                matches.append(0.0)
-            else:
-                last_confidence = confidence_matches[-1]
-                try:
-                    confidence = float(last_confidence.strip())
-                    # Check if confidence is in valid range [0, 100]
-                    if 0 <= confidence <= 100:
-                        matches.append(1.0)
-                    else:
-                        matches.append(0.0)
-                except ValueError:
-                    matches.append(0.0)
-        else:
-            # No confidence required in format pattern
-            matches.append(1.0)
-    return matches
-
-
-def strict_confidence_reward(completions: Iterable, **kwargs) -> List[float]:
-    """
-    Reward only if the completion ends with a well-formed confidence tag.
-    Expected suffix: <confidence>0-100</confidence> with no trailing text.
-    """
-    pattern = r"<confidence>\s*([0-9]+(?:\.[0-9]+)?)\s*</confidence>\s*$"
-
-    normalized = _normalize_completions(completions)
-    completion_contents = [completion[0]["content"] for completion in normalized]
-    rewards: List[float] = []
-
-    for content in completion_contents:
-        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
-        if not match:
-            rewards.append(0.0)
-            continue
-
-        try:
-            conf_val = float(match.group(1))
-        except ValueError:
-            rewards.append(0.0)
-            continue
-
-        if 0.0 <= conf_val <= 100.0:
-            rewards.append(1.0)
-        else:
-            rewards.append(0.0)
-
-    return rewards
-
-
-
-
-import re, math
-from typing import Iterable, List, Optional, Tuple
-
-# completion starts right after "<confidence>" (opening tag is in the prompt)
-# So the first thing the model outputs should be a number, then </confidence>.
-_START_CLOSE_RE = re.compile(
-    r"^\s*([+-]?\d+(?:\.\d+)?)\s*%?\s*</confidence>",
-    flags=re.IGNORECASE | re.DOTALL,
-)
-
-# optional fallback: model outputs its own <confidence> ... </confidence>
-_TAGGED_RE = re.compile(
-    r"<confidence>\s*([+-]?\d+(?:\.\d+)?)\s*%?\s*</confidence>",
-    flags=re.IGNORECASE | re.DOTALL,
-)
-
-def _extract_confidence_0_1_from_completion_start(content: str) -> Optional[float]:
-    """
-    Enforce: the FIRST token after the provided '<confidence>' (i.e., at the start of completion)
-    must be numeric and followed by '</confidence>'.
-    Confidence is assumed in [0, 100], mapped to [0, 1].
-    """
-    if not content:
+    if not matches:
         return None
+    
+    # Return the last match (in case there are multiple)
+    return matches[-1].strip()
 
-    m = _START_CLOSE_RE.search(content)
-    if m:
-        raw = m.group(1)
-    else:
-        # fallback (optional): if the model redundantly prints <confidence>...</confidence> itself
-        ms = _TAGGED_RE.findall(content)
-        if not ms:
-            return None
-        raw = ms[-1]
 
+def extract_confidence(completion: str) -> Optional[float]:
+    """
+    Extract confidence from <confidence>...</confidence> tags.
+    Expects confidence in range [0, 100], returns normalized to [0, 1].
+    """
+    pattern = r"<confidence>\s*([0-9]+(?:\.[0-9]+)?)\s*</confidence>"
+    matches = re.findall(pattern, completion, re.DOTALL | re.IGNORECASE)
+    
+    if not matches:
+        return None
+    
     try:
-        conf_100 = float(raw)
-    except ValueError:
+        # Use the last match
+        conf_value = float(matches[-1])
+        
+        # Normalize from [0, 100] to [0, 1]
+        conf_normalized = conf_value / 100.0
+        
+        # Clip to valid range
+        return max(0.0, min(1.0, conf_normalized))
+    except (ValueError, TypeError):
         return None
 
-    conf = conf_100 * 0.01
-    if math.isnan(conf) or math.isinf(conf):
-        return None
-    return max(0.0, min(conf, 1.0))
+
+def check_correctness(predicted_answer: str, true_answer: str) -> bool:
+    """
+    Compare predicted answer with true answer.
+    Simple exact match after stripping whitespace.
+    """
+    if predicted_answer is None or true_answer is None:
+        return False
+    
+    return predicted_answer.strip().lower() in true_answer.strip().lower()
 
 
 def brier_reward(
-    completions: Iterable,
-    correctness: Iterable[int],
-    missing_penalty: float = -1.25,
-    invalid_penalty: float = -1.25,
-    reward_clip: Tuple[float, float] = (-1.0, 0.0),
+    completions: List[str],
+    true_answers: List[str],
+    missing_penalty: float = -10.0,
+    reward_clip: tuple = (-1.0, 0.0),
     **kwargs,
 ) -> List[float]:
     """
-    Reward = -(conf - y)^2, where conf in [0,1], y in {0,1}.
-    Enforces that completion starts with numeric confidence followed by </confidence>.
-    Missing/invalid gets strong negative penalty (prevents 'skip' hacking).
+    Calculate Brier score reward: -((confidence - correctness)^2)
+    
+    Args:
+        completions: List of model completions
+        true_answers: List of ground truth answers
+        missing_penalty: Penalty when answer or confidence is missing
+        reward_clip: (min, max) tuple to clip rewards
+    
+    Returns:
+        List of reward values
     """
-    normalized = _normalize_completions(completions)
-    contents = [c[0]["content"] for c in normalized]
-    ys = list(correctness)
-
-    out: List[float] = []
-    for content, y in zip(contents, ys):
-        conf = _extract_confidence_0_1_from_completion_start(content)
-
-        if conf is None:
-            # differentiate "no closing tag at all" vs "has closing but malformed"
-            pen = missing_penalty if "</confidence>" not in (content or "") else invalid_penalty
-            r = pen
-        else:
-            r = -((conf - float(y)) ** 2)  # in [-1, 0]
-
-        lo, hi = reward_clip
-        r = max(lo, min(r, hi))
-        out.append(float(r))
-
-    return out
+    rewards = []
+    
+    for completion, true_answer in zip(completions, true_answers):
+        # Extract answer and confidence
+        predicted_answer = extract_answer(completion)
+        confidence = extract_confidence(completion)
+        
+        # Check if extraction failed
+        if predicted_answer is None or confidence is None:
+            rewards.append(missing_penalty)
+            continue
+        
+        # Check correctness (1.0 if correct, 0.0 if wrong)
+        is_correct = 1.0 if check_correctness(predicted_answer, true_answer) else 0.0
+        
+        # Calculate Brier score: negative squared error
+        reward = -((confidence - is_correct) ** 2)
+        
+        # Clip reward to valid range
+        reward = max(reward_clip[0], min(reward, reward_clip[1]))
+        
+        if is_correct:
+            reward += 0.25
+            
+        rewards.append(reward)
+    
+    return rewards
 
 
 def log_loss_reward(
-    completions: Iterable,
-    correctness: Iterable[int],
+    completions: List[str],
+    true_answers: List[str],
     epsilon: float = 1e-4,
     missing_penalty: float = -10.0,
-    invalid_penalty: float = -10.0,
-    reward_clip: Tuple[float, float] = (-10.0, 0.0),
+    reward_clip: tuple = (-6.0, 0.0),
     **kwargs,
 ) -> List[float]:
     """
-    Reward keeps original log-loss semantics but in reward form:
-      y=1: reward = log(conf)
-      y=0: reward = log(1-conf)
-    Both <= 0. Uses epsilon + clipping for stability and anti-exploit.
-    Enforces completion starts with numeric confidence followed by </confidence>.
+    Calculate log loss reward:
+      - If correct: log(confidence)
+      - If wrong: log(1 - confidence)
+    
+    Args:
+        completions: List of model completions
+        true_answers: List of ground truth answers
+        epsilon: Small value to avoid log(0)
+        missing_penalty: Penalty when answer or confidence is missing
+        reward_clip: (min, max) tuple to clip rewards
+    
+    Returns:
+        List of reward values
     """
-    normalized = _normalize_completions(completions)
-    contents = [c[0]["content"] for c in normalized]
-    ys = list(correctness)
-
-    out: List[float] = []
-    for content, y in zip(contents, ys):
-        conf = _extract_confidence_0_1_from_completion_start(content)
-
-        if conf is None:
-            pen = missing_penalty if "</confidence>" not in (content or "") else invalid_penalty
-            r = pen
+    rewards = []
+    
+    for completion, true_answer in zip(completions, true_answers):
+        # Extract answer and confidence
+        predicted_answer = extract_answer(completion)
+        confidence = extract_confidence(completion)
+        
+        # Check if extraction failed
+        if predicted_answer is None or confidence is None:
+            rewards.append(missing_penalty)
+            continue
+        
+        # Check correctness
+        is_correct = check_correctness(predicted_answer, true_answer)
+        
+        # Calculate log loss
+        if is_correct:
+            # Correct: reward = log(confidence)
+            reward = math.log(max(confidence, epsilon))
         else:
-            if int(y) == 1:
-                r = math.log(max(conf, epsilon))          # <= 0
-            else:
-                r = math.log(max(1.0 - conf, epsilon))    # <= 0
-
-        lo, hi = reward_clip
-        r = max(lo, min(r, hi))
-        out.append(float(r))
-
-    return out
+            # Wrong: reward = log(1 - confidence)
+            reward = math.log(max(1.0 - confidence, epsilon))
+        
+        # Clip reward to valid range
+        reward = max(reward_clip[0], min(reward, reward_clip[1]))
+        
+        if is_correct:
+            reward += 0.25 
+            
+        rewards.append(reward)
+    
+    return rewards

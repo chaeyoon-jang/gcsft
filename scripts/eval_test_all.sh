@@ -11,7 +11,7 @@ set -euo pipefail
 # Default parameters
 TEMPERATURE=${TEMPERATURE:-0.0}
 TOP_P=${TOP_P:-1.0}
-TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-1}
+TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-2}
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.9}
 USE_CHAT_TEMPLATE=${USE_CHAT_TEMPLATE:-true}
 
@@ -75,23 +75,23 @@ run_evaluation() {
 run_evaluation \
     "llama_3b" \
     "meta-llama/Llama-3.2-3B-Instruct" \
-    "data/processed/mmlu_test.csv" \
-    "mmlu" \
-    "answer_only" \
-    "logs/zero_shot_test_evals" \
-    50 \
-    16 \
+    "data/processed/math_train.csv" \
+    "math" \
+    "reasoning" \
+    "logs/training_data" \
+    4096 \
+    32 \
     "You are an expert assistant that provides clear and helpful answers."
 
 # run_evaluation \
 #     "llama_3b" \
 #     "meta-llama/Llama-3.2-3B-Instruct" \
-#     "openai/gsm8k" \
-#     "gsm" \
+#     "data/processed/math_test.csv" \
+#     "math" \
 #     "reasoning" \
 #     "logs/zero_shot_test_evals" \
 #     4096 \
-#     32 \
+#     16 \
 #     "You are an expert assistant that provides clear and helpful answers."
 
 # ============================================================================
@@ -102,12 +102,12 @@ run_evaluation \
 # run_evaluation \
 #     "qwen_8b" \
 #     "Qwen/Qwen3-8B" \
-#     "data/processed/math_test.csv" \
-#     "math" \
+#     "data/processed/gpqa_diamond.csv" \
+#     "gpqa" \
 #     "reasoning" \
 #     "logs/zero_shot_test_evals" \
-#     4096 \
-#     16
+#     8000 \
+#     8
 
 # run_evaluation \
 #     "qwen_8b" \
@@ -117,8 +117,27 @@ run_evaluation \
 #     "answer_only" \
 #     "logs/zero_shot_test_evals" \
 #     50 \
-#     16
+#     8
 
+# run_evaluation \
+#     "qwen_8b" \
+#     "Qwen/Qwen3-8B" \
+#     "data/processed/mmlu_test.csv" \
+#     "mmlu" \
+#     "answer_only" \
+#     "logs/zero_shot_test_evals" \
+#     50 \
+#     8
+
+# run_evaluation \
+#     "qwen_8b" \
+#     "Qwen/Qwen3-8B" \
+#     "data/processed/contract_nli_test.csv" \
+#     "contract_nli" \
+#     "reasoning" \
+#     "logs/zero_shot_test_evals" \
+#     4096 \
+#     8
 # ============================================================================
 # 3. GPT-OSS-20B Evaluations
 # ============================================================================

@@ -11,7 +11,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from trl import GRPOConfig, GRPOTrainer
 
-from utils.reward_func import brier_reward, log_loss_reward, strict_confidence_reward
+from utils.reward_func import brier_reward, log_loss_reward
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,12 +24,12 @@ def parse_args() -> argparse.Namespace:
     
     # Data columns
     parser.add_argument("--confidence_input_key", default="prompt", help="Column name for prompts")
-    parser.add_argument("--confidence_key", default="tf", help="Column name for correctness (0 or 1)")
+    parser.add_argument("--confidence_key", default="true_answer", help="Column name for correctness (0 or 1)")
     
     # Generation parameters
-    parser.add_argument("--max_seq_length", type=int, default=4096)
-    parser.add_argument("--max_prompt_length", type=int, default=3000)
-    parser.add_argument("--max_completion_length", type=int, default=10)
+    parser.add_argument("--max_seq_length", type=int, default=8000)
+    parser.add_argument("--max_prompt_length", type=int, default=4096)
+    parser.add_argument("--max_completion_length", type=int, default=2048)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)
     
@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=1, help="Per device batch size")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=32)
     parser.add_argument("--num_train_epochs", type=int, default=1)
-    parser.add_argument("--max_steps", type=int, default=2000)
+    parser.add_argument("--max_steps", type=int, default=1000)
     parser.add_argument("--learning_rate", type=float, default=1e-5)
     parser.add_argument("--kl_decay", type=float, default=1.0, help="KL divergence weight decay")
     parser.add_argument("--seed", type=int, default=42)
@@ -81,8 +81,16 @@ def load_datasets(args):
     model_name_short = args.model_name.split("/")[-1]
     base_path = Path("data/train_data") / model_name_short / "rl_base"
     
-    train_df = pd.read_csv(base_path / f"{args.train_type}_train.csv").dropna()
-    eval_df = pd.read_csv(base_path / f"{args.train_type}_valid.csv").dropna()
+    if args.train_type == 'multi':
+        gsm_train_df = pd.read_csv(base_path / "gsm_train.csv").dropna()
+        gsm_eval_df = pd.read_csv(base_path / "gsm_valid.csv").dropna()
+        ruler_train_df = pd.read_csv(base_path / "ruler_4k_train.csv").dropna()
+        ruler_eval_df = pd.read_csv(base_path / "ruler_4k_valid.csv").dropna()
+        train_df = pd.concat([gsm_train_df, ruler_train_df], ignore_index=True)
+        eval_df = pd.concat([gsm_eval_df, ruler_eval_df], ignore_index=True)
+    else:
+        train_df = pd.read_csv(base_path / f"{args.train_type}_train.csv").dropna()
+        eval_df = pd.read_csv(base_path / f"{args.train_type}_valid.csv").dropna()
         
     train_df = train_df.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
     eval_df = eval_df.sample(frac=1.0, random_state=args.seed).reset_index(drop=True)
@@ -241,7 +249,7 @@ def main(args):
     def brier_reward_fn(prompts: List[str], completions: List[str], **kwargs: Any) -> List[float]:
         rewards = brier_reward(
             completions,
-            kwargs.get("tf") or [],
+            kwargs.get("true_answer") or [],
         )
         _maybe_debug_print(prompts, completions, rewards)
         return rewards
@@ -251,14 +259,9 @@ def main(args):
     ) -> List[float]:
         rewards = log_loss_reward(
             completions,
-            kwargs.get("tf") or [],
+            kwargs.get("true_answer") or [],
             epsilon=args.log_loss_epsilon,
         )
-        _maybe_debug_print(prompts, completions, rewards)
-        return rewards
-
-    def strict_conf_reward_fn(prompts: List[str], completions: List[str], **kwargs: Any) -> List[float]:
-        rewards = strict_confidence_reward(completions)
         _maybe_debug_print(prompts, completions, rewards)
         return rewards
 
@@ -268,9 +271,6 @@ def main(args):
     elif args.reward_mode == "log_loss":
         reward_funcs = [log_loss_reward_fn]
         print("Using Log-loss reward")
-    elif args.reward_mode == "strict_conf":
-        reward_funcs = [strict_conf_reward_fn]
-        print("Using strict confidence format reward")
     else:
         raise ValueError(f"Unknown reward mode: {args.reward_mode}")
 

@@ -1,43 +1,18 @@
-input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-600/Llama-3.2-3B-Instruct_gsm_test.jsonl"
-output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-600/Llama-3.2-3B-Instruct_gsm_test_parsed.jsonl"
+# input_file="/mnt/home/chaeyun-jang/gcsft/logs/trained_models/Llama-3.2-3B-Instruct_log_loss_gsm_seed42_lr1e-05_kl0.6_bs1_gs32_ms1000_checkpoint-400/Llama-3.2-3B-Instruct_gsm_test.jsonl"
+# output_file="/mnt/home/chaeyun-jang/gcsft/logs/trained_models/Llama-3.2-3B-Instruct_log_loss_gsm_seed42_lr1e-05_kl0.6_bs1_gs32_ms1000_checkpoint-400/Llama-3.2-3B-Instruct_gsm_test_parsed.jsonl"
 
-args=(
-    --task_type "gsm"
-    --input_file "${input_file}"
-    --output_file "${output_file}"
-)
+# args=(
+#     --task_type "gsm"
+#     --input_file "${input_file}"
+#     --output_file "${output_file}"
+# )
 
-python -m experiments.parsing "${args[@]}"
-echo "Saved ${output_file}"
-
-###
-input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1_checkpoint-800/Llama-3.2-3B-Instruct_gsm_test.jsonl"
-output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1_checkpoint-800/Llama-3.2-3B-Instruct_gsm_test_parsed.jsonl"
-
-args=(
-    --task_type "gsm"
-    --input_file "${input_file}"
-    --output_file "${output_file}"
-)
-
-python -m experiments.parsing "${args[@]}"
-echo "Saved ${output_file}"
+# python -m experiments.parsing "${args[@]}"
+# echo "Saved ${output_file}"
 
 ###
-input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_gsm_test.jsonl"
-output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_gsm_test_parsed.jsonl"
-
-args=(
-    --task_type "gsm"
-    --input_file "${input_file}"
-    --output_file "${output_file}"
-)
-
-python -m experiments.parsing "${args[@]}"
-echo "Saved ${output_file}"
-
-input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-600/Llama-3.2-3B-Instruct_math_test.jsonl"
-output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-600/Llama-3.2-3B-Instruct_math_test_parsed.jsonl"
+input_file="/mnt/home/chaeyun-jang/gcsft/logs/training_data/llama_3b_math_train.jsonl"
+output_file="/mnt/home/chaeyun-jang/gcsft/logs/training_data/llama_3b_math_train_parsed.jsonl"
 
 args=(
     --task_type "math"
@@ -48,28 +23,53 @@ args=(
 python -m experiments.parsing "${args[@]}"
 echo "Saved ${output_file}"
 
-###
-input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1_checkpoint-800/Llama-3.2-3B-Instruct_math_test.jsonl"
-output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1_checkpoint-800/Llama-3.2-3B-Instruct_math_test_parsed.jsonl"
+# ###
+# input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_gsm_test.jsonl"
+# output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_gsm_test_parsed.jsonl"
 
-args=(
-    --task_type "math"
-    --input_file "${input_file}"
-    --output_file "${output_file}"
-)
+# args=(
+#     --task_type "gsm"
+#     --input_file "${input_file}"
+#     --output_file "${output_file}"
+# )
 
-python -m experiments.parsing "${args[@]}"
-echo "Saved ${output_file}"
+# python -m experiments.parsing "${args[@]}"
+# echo "Saved ${output_file}"
 
-###
-input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_math_test.jsonl"
-output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_math_test_parsed.jsonl"
+# input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-600/Llama-3.2-3B-Instruct_math_test.jsonl"
+# output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-600/Llama-3.2-3B-Instruct_math_test_parsed.jsonl"
 
-args=(
-    --task_type "math"
-    --input_file "${input_file}"
-    --output_file "${output_file}"
-)
+# args=(
+#     --task_type "math"
+#     --input_file "${input_file}"
+#     --output_file "${output_file}"
+# )
 
-python -m experiments.parsing "${args[@]}"
-echo "Saved ${output_file}"
+# python -m experiments.parsing "${args[@]}"
+# echo "Saved ${output_file}"
+
+# ###
+# input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1_checkpoint-800/Llama-3.2-3B-Instruct_math_test.jsonl"
+# output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_gsm_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck1_checkpoint-800/Llama-3.2-3B-Instruct_math_test_parsed.jsonl"
+
+# args=(
+#     --task_type "math"
+#     --input_file "${input_file}"
+#     --output_file "${output_file}"
+# )
+
+# python -m experiments.parsing "${args[@]}"
+# echo "Saved ${output_file}"
+
+# ###
+# input_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_math_test.jsonl"
+# output_file="/mnt/home/chaeyun-jang/gcsft/logs/single_finals/Llama-3.2-3B-Instruct_csft_single_ruler_4k_seed0_lr0.0001_kl0.0_bs2_gs16_ms2000_ck0_checkpoint-800/Llama-3.2-3B-Instruct_math_test_parsed.jsonl"
+
+# args=(
+#     --task_type "math"
+#     --input_file "${input_file}"
+#     --output_file "${output_file}"
+# )
+
+# python -m experiments.parsing "${args[@]}"
+# echo "Saved ${output_file}"

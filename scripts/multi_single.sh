@@ -49,7 +49,7 @@ run_evaluation() {
         --tensor_parallel_size "${TENSOR_PARALLEL_SIZE}"
         --gpu_memory_utilization "${GPU_MEMORY_UTILIZATION}"
         --data_type "${data_type}"
-        --confidence_prompt_name "single"
+        --confidence_prompt_name "multi"
         --add_conf
     )
     

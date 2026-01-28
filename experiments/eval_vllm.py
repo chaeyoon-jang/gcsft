@@ -138,26 +138,28 @@ def main() -> None:
     )
 
     if args.query_peft_dir:
-        
-        exact_dir = args.query_peft_dir.rsplit("/", 1)[0] + "/merged_model"
-        
-        if not os.path.isdir(exact_dir):
-            from transformers import AutoModelForCausalLM
-            from peft import PeftModel
-            model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, 
-                                                         device_map="auto", 
-                                                         torch_dtype="auto")
-            model = PeftModel.from_pretrained(model, args.query_peft_dir)
-            tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-            model = model.merge_and_unload()
+        try:
+            exact_dir = args.query_peft_dir.rsplit("/", 1)[0] + "/merged_model"
             
-            print("LoRA weights merged successfully.")
-            model.save_pretrained(exact_dir)
-            tokenizer.save_pretrained(exact_dir)
-            
-            del model, tokenizer
-            import gc 
-            gc.collect()
+            if not os.path.isdir(exact_dir):
+                from transformers import AutoModelForCausalLM
+                from peft import PeftModel
+                model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, 
+                                                            device_map="auto", 
+                                                            torch_dtype="auto")
+                model = PeftModel.from_pretrained(model, args.query_peft_dir)
+                tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+                model = model.merge_and_unload()
+                
+                print("LoRA weights merged successfully.")
+                model.save_pretrained(exact_dir)
+                tokenizer.save_pretrained(exact_dir)
+                
+                del model, tokenizer
+                import gc 
+                gc.collect()
+        except: # this for rl trained models... (I saved the model's full state_dict...)
+            exact_dir = args.query_peft_dir
             
     llm = LLM(
         model=args.model_name_or_path if not args.query_peft_dir else exact_dir,
@@ -173,6 +175,8 @@ def main() -> None:
         
     instruction_prompt = get_reasoning_prompt("default") if args.instruction_type == "reasoning" else \
                          get_answer_only_prompt("default")
+    if "mmlu" in args.eval_file.lower():
+        instruction_prompt = get_answer_only_prompt("mc")
     prompt_entries = [
         build_prompt(row, tokenizer, args.use_chat_template, instruction_prompt, args.system_prompt)
         for row in dataset
@@ -273,8 +277,8 @@ def main() -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    with open(str(output_path) + ".metrics.json", "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+    # with open(str(output_path) + ".metrics.json", "w", encoding="utf-8") as f:
+    #     json.dump(results, f, ensure_ascii=False, indent=2)
 
     # Print concise timing summary for terminal visibility
     print(f"Processed {len(records)} examples in {elapsed_seconds:.2f}s. Outputs: {output_path}")

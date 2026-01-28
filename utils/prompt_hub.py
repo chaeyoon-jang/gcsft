@@ -17,6 +17,16 @@ ANSWER_ONLY_PROMPTS: Dict[str, str] = {
         "Respond with the answer enclosed in <answer> and </answer> tags.\n"
         "The <answer> tag must contain only the final answer, with no additional explanation.\n\n"
     ),
+    "mc": (
+        "You are an answering assistant.\n"
+        "Choose the correct option among A, B, C, D.\n"
+        "Output MUST match exactly this regex:\n"
+        "^<answer>[ABCD]</answer>$\n"
+        "Rules:\n"
+        "- Output ONLY one letter inside <answer>.\n"
+        "- No numbers, no punctuation, no spaces, no explanations.\n"
+        "- Even if unsure, output one of A/B/C/D.\n\n"
+    )
 }
 
 CONFIDENCE_PROMPTS: Dict[str, str] = {
@@ -67,3 +77,8 @@ def get_answer_only_prompt(name: str = "default") -> str:
     if name not in ANSWER_ONLY_PROMPTS:
         raise KeyError(f"Unknown answer-only prompt: {name}")
     return ANSWER_ONLY_PROMPTS[name]
+
+################################################################################
+
+RL_PROMPT = """
+"""
